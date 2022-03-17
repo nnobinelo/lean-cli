@@ -28,7 +28,7 @@ import docker
 from dateutil.parser import isoparse
 from docker.errors import APIError
 from docker.models.containers import Container
-from docker.types import Mount
+from docker.types import Mount, DeviceRequest
 
 from lean.components.util.logger import Logger
 from lean.components.util.platform_manager import PlatformManager
@@ -136,6 +136,12 @@ class DockerManager:
 
         if detach and "remove" not in kwargs:
             kwargs["remove"] = True
+
+        gpu = kwargs.pop("gpu", False)
+
+        if gpu:
+            kwargs["device_requests"] = [DeviceRequest(count=-1, capabilities=[['gpu']])]
+            kwargs["environment"]["NVIDIA_VISIBLE_DEVICES"] = "all"
 
         # Make sure host.docker.internal resolves on Linux
         # See https://github.com/QuantConnect/Lean/pull/5092

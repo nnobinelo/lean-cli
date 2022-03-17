@@ -213,6 +213,7 @@ class LeanRunner:
         lean_config["results-destination-folder"] = "/Results"
         lean_config["object-store-root"] = "/Storage"
 
+
         # The dict containing all options passed to `docker run`
         # See all available options at https://docker-py.readthedocs.io/en/stable/containers.html
         run_options: Dict[str, Any] = {
@@ -222,7 +223,8 @@ class LeanRunner:
             "stop_signal": "SIGINT" if debugging_method is None else "SIGKILL",
             "mounts": [],
             "volumes": {},
-            "ports": docker_project_config.get("ports", {})
+            "ports": docker_project_config.get("ports", {}),
+            "gpu": docker_project_config.get("gpu", False)
         }
 
         # Mount the data directory
