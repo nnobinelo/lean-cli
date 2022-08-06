@@ -22,9 +22,9 @@ from lean.components.config.cli_config_manager import CLIConfigManager
 from lean.components.config.project_config_manager import ProjectConfigManager
 from lean.components.config.storage import Storage
 from lean.components.util.logger import Logger
-from lean.constants import DEFAULT_LEAN_CONFIG_FILE_NAME, GUI_PRODUCT_INSTALL_ID
-from lean.models.config import DebuggingMethod
+from lean.constants import DEFAULT_LEAN_CONFIG_FILE_NAME
 from lean.models.errors import MoreInfoError
+from lean.models.utils import DebuggingMethod
 
 
 class LeanConfigManager:
@@ -80,7 +80,7 @@ class LeanConfigManager:
             # If the parent directory is the same as the current directory we can't go up any more
             if current_dir.parent == current_dir:
                 raise MoreInfoError(f"'{DEFAULT_LEAN_CONFIG_FILE_NAME}' not found",
-                                    "https://www.lean.io/docs/lean-cli/user-guides/configuration#03-Lean-configuration")
+                                    "https://www.lean.io/docs/lean-cli/initialization/configuration#03-Lean-Configuration")
 
             current_dir = current_dir.parent
 
@@ -262,8 +262,11 @@ class LeanConfigManager:
         project_config = self._project_config_manager.get_project_config(algorithm_file.parent)
         config["parameters"] = project_config.get("parameters", {})
 
-        if self._module_manager.is_module_installed(GUI_PRODUCT_INSTALL_ID):
-            config["messaging-handler"] = "QuantConnect.GUI.LocalMessagingHandler"
+        # No real limit for the object store by default
+        if "storage-limit-mb" not in config:
+            config["storage-limit-mb"] = "9999999"
+        if "storage-file-count" not in config:
+            config["storage-file-count"] = "9999999"
 
         return config
 

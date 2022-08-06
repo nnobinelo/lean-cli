@@ -25,7 +25,7 @@ from lean.components.util.xml_manager import XMLManager
 from lean.constants import DEFAULT_ENGINE_IMAGE
 from lean.container import container
 from lean.models.api import QCMinimalOrganization
-from lean.models.config import DebuggingMethod
+from lean.models.utils import DebuggingMethod
 from lean.models.docker import DockerImage
 from tests.test_helpers import create_fake_lean_cli_directory
 
@@ -513,8 +513,7 @@ def test_backtest_auto_updates_outdated_csharp_csproj() -> None:
     <PropertyGroup>
         <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
         <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-        <TargetFramework>net5.0</TargetFramework>
-        <LangVersion>9</LangVersion>
+        <TargetFramework>net6.0</TargetFramework>
         <OutputPath>bin/$(Configuration)</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <NoWarn>CS0618</NoWarn>

@@ -26,7 +26,7 @@ from lean.components.util.project_manager import ProjectManager
 from lean.components.util.temp_manager import TempManager
 from lean.components.util.xml_manager import XMLManager
 from lean.constants import DEFAULT_ENGINE_IMAGE
-from lean.models.config import DebuggingMethod
+from lean.models.utils import DebuggingMethod
 from lean.models.docker import DockerImage
 from lean.models.modules import NuGetPackage
 from tests.test_helpers import create_fake_lean_cli_directory
@@ -285,6 +285,29 @@ def test_lean_runner_copies_code_to_output_directory() -> None:
     copied_content = (Path.cwd() / "output" / "code" / "main.py").read_text(encoding="utf-8")
     assert source_content == copied_content
 
+
+def test_run_lean_compiles_python_project() -> None:
+    create_fake_lean_cli_directory()
+
+    docker_manager = mock.Mock()
+    docker_manager.run_image.return_value = True
+
+    lean_runner = create_lean_runner(docker_manager)
+
+    lean_runner.run_lean({},
+                         "backtesting",
+                         Path.cwd() / "Python Project" / "main.py",
+                         Path.cwd() / "output",
+                         ENGINE_IMAGE,
+                         None,
+                         False,
+                         False)
+
+    docker_manager.run_image.assert_called_once()
+    args, kwargs = docker_manager.run_image.call_args
+
+    build_command = next((cmd for cmd in kwargs["commands"] if cmd.startswith("python -m compileall")), None)
+    assert build_command is not None
 
 def test_run_lean_mounts_project_directory_when_running_python_algorithm() -> None:
     create_fake_lean_cli_directory()

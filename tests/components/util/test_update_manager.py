@@ -187,22 +187,6 @@ def test_pull_docker_image_if_necessary_does_nothing_when_api_responds_with_erro
     docker_manager.pull_image.assert_not_called()
 
 
-def test_pull_docker_image_if_necessary_does_not_update_existing_image_when_called_from_gui() -> None:
-    os.environ["QC_LOCAL_GUI"] = "true"
-
-    logger, storage, docker_manager, update_manager = create_objects()
-
-    docker_manager.image_installed.return_value = True
-    docker_manager.get_local_digest.return_value = "abc"
-    docker_manager.get_remote_digest.return_value = "def"
-
-    update_manager.pull_docker_image_if_necessary(DOCKER_IMAGE, False)
-
-    docker_manager.pull_image.assert_not_called()
-
-    os.environ["QC_LOCAL_GUI"] = "false"
-
-
 def test_show_announcements_logs_when_announcements_have_never_been_shown(requests_mock: RequestsMock) -> None:
     requests_mock.add(requests_mock.GET,
                       "https://raw.githubusercontent.com/QuantConnect/lean-cli/master/announcements.json",
@@ -210,7 +194,7 @@ def test_show_announcements_logs_when_announcements_have_never_been_shown(reques
                           "announcements": [
                               {
                                   "date": "2021-06-04",
-                                  "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/user-guides/local-data"
+                                  "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/datasets/local-data"
                               }
                           ]
                       }))
@@ -229,7 +213,7 @@ def test_show_announcements_logs_when_announcements_have_been_updated(requests_m
                           "announcements": [
                               {
                                   "date": "2021-06-04",
-                                  "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/user-guides/local-data"
+                                  "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/datasets/local-data"
                               }
                           ]
                       }))
@@ -254,7 +238,7 @@ def test_show_announcements_only_checks_once_every_day(requests_mock: RequestsMo
                               "announcements": [
                                   {
                                       "date": "2021-06-04",
-                                      "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/user-guides/local-data"
+                                      "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/datasets/local-data"
                                   }
                               ]
                           }))
@@ -275,7 +259,7 @@ def test_show_announcements_does_nothing_when_latest_announcements_shown_before(
         "announcements": [
             {
                 "date": "2021-06-04",
-                "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/user-guides/local-data"
+                "message": "Downloading data for local usage is now a lot easier:\nhttps://www.lean.io/docs/lean-cli/datasets/local-data"
             }
         ]
     })

@@ -14,17 +14,14 @@
 import webbrowser
 from pathlib import Path
 from typing import Optional
-
 import click
 from docker.errors import APIError
 from docker.types import Mount
-
 from lean.click import LeanCommand, PathParameter
-from lean.constants import DEFAULT_RESEARCH_IMAGE, GUI_PRODUCT_INSTALL_ID
+from lean.constants import DEFAULT_RESEARCH_IMAGE
 from lean.container import container
-from lean.models.data_providers import all_data_providers
-from lean.models.data_providers.quantconnect import QuantConnectDataProvider
-
+from lean.models.data_providers import QuantConnectDataProvider, all_data_providers
+from lean.components.util.name_extraction import convert_to_class_name
 
 def _check_docker_output(chunk: str, port: int) -> None:
     """Checks the output of the Docker container and opens the browser if Jupyter Lab has started.
@@ -79,10 +76,12 @@ def research(project: Path,
     """
     project_manager = container.project_manager()
     algorithm_file = project_manager.find_algorithm_file(project)
+    algorithm_name = convert_to_class_name(project)
 
     lean_config_manager = container.lean_config_manager()
     lean_config = lean_config_manager.get_complete_lean_config("backtesting", algorithm_file, None)
     lean_config["composer-dll-directory"] = "/Lean/Launcher/bin/Debug"
+    lean_config["research-object-store-name"] = algorithm_name
 
     if download_data:
         data_provider = QuantConnectDataProvider.get_name()
@@ -115,11 +114,6 @@ def research(project: Path,
     # Open the browser as soon as Jupyter Lab has started
     if detach or not no_open:
         run_options["on_output"] = lambda chunk: _check_docker_output(chunk, port)
-
-    # Give container an identifiable name when running it from the GUI
-    if container.module_manager().is_module_installed(GUI_PRODUCT_INSTALL_ID):
-        project_id = container.project_config_manager().get_local_id(algorithm_file.parent)
-        run_options["name"] = f"lean_cli_gui_research_{project_id}"
 
     # Make Ctrl+C stop Jupyter Lab immediately
     run_options["stop_signal"] = "SIGKILL"

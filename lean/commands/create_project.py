@@ -11,15 +11,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
 from pathlib import Path
-
 import click
-
 from lean.click import LeanCommand
 from lean.container import container
 from lean.models.api import QCLanguage
 from lean.models.errors import MoreInfoError
+from lean.components.util.name_extraction import convert_to_class_name
 
 DEFAULT_PYTHON_MAIN = '''
 from AlgorithmImports import *
@@ -159,7 +157,7 @@ namespace QuantConnect
     {
         /*
          * To use this library, first add it to a solution and create a project reference in your algorithm project:
-         * https://www.lean.io/docs/lean-cli/tutorials/code-sharing#02-C-code-sharing
+         * https://www.lean.io/docs/lean-cli/projects/libraries/project-libraries#02-C-Libraries
          *
          * Then add its namespace at the top of the page:
          * using QuantConnect;
@@ -262,17 +260,6 @@ DEFAULT_CSHARP_NOTEBOOK = """
 """.strip() + "\n"
 
 
-def _capitalize(word: str) -> str:
-    """Capitalizes the given word.
-
-    :param word: the word to capitalize
-    :return: the word with the first letter capitalized (any other uppercase characters are preserved)
-    """
-    if word == "":
-        return word
-    return word[0].upper() + word[1:]
-
-
 @click.command(cls=LeanCommand)
 @click.argument("name", type=str)
 @click.option("--language", "-l",
@@ -291,13 +278,13 @@ def create_project(name: str, language: str) -> None:
     if language is None:
         raise MoreInfoError(
             "Please specify a language with --language or set the default language using `lean config set default-language python/csharp`",
-            "https://www.lean.io/docs/lean-cli/tutorials/project-management")
+            "https://www.lean.io/docs/lean-cli/projects/project-management")
 
     full_path = Path.cwd() / name
 
     if not container.path_manager().is_path_valid(full_path):
         raise MoreInfoError(f"'{name}' is not a valid path",
-                            "https://www.lean.io/docs/lean-cli/user-guides/troubleshooting#02-Common-errors")
+                            "https://www.lean.io/docs/lean-cli/key-concepts/troubleshooting#02-Common-Errors")
 
     is_library_project = False
     try:
@@ -317,8 +304,7 @@ def create_project(name: str, language: str) -> None:
         project_manager = container.project_manager()
         project_manager.create_new_project(full_path, QCLanguage.Python if language == "python" else QCLanguage.CSharp)
 
-    # Convert the project name into a valid class name by removing all non-alphanumeric characters
-    class_name = re.sub(f"[^a-zA-Z0-9]", "", "".join(map(_capitalize, full_path.name.split(" "))))
+    class_name = convert_to_class_name(full_path)
 
     if language == "python":
         main_name = "main.py"

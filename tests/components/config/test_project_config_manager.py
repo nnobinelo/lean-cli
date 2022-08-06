@@ -15,7 +15,7 @@ from pathlib import Path
 
 from lean.components.config.project_config_manager import ProjectConfigManager
 from lean.components.util.xml_manager import XMLManager
-from lean.models.config import CSharpLibrary
+from lean.models.utils import CSharpLibrary
 from tests.test_helpers import create_fake_lean_cli_directory
 
 
@@ -60,8 +60,7 @@ def test_get_csharp_libraries_returns_all_libraries_in_package_reference_tags_in
     <PropertyGroup>
         <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
         <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-        <TargetFramework>net5.0</TargetFramework>
-        <LangVersion>9</LangVersion>
+        <TargetFramework>net6.0</TargetFramework>
         <OutputPath>bin/$(Configuration)</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <NoWarn>CS0618</NoWarn>
@@ -100,8 +99,7 @@ def test_get_csharp_libraries_skips_invalid_package_reference_tags() -> None:
     <PropertyGroup>
         <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
         <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-        <TargetFramework>net5.0</TargetFramework>
-        <LangVersion>9</LangVersion>
+        <TargetFramework>net6.0</TargetFramework>
         <OutputPath>bin/$(Configuration)</OutputPath>
         <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
         <NoWarn>CS0618</NoWarn>

@@ -11,15 +11,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from lean.models.brokerages.cloud.cloud_brokerage import CloudBrokerage
-from lean.models import json_modules
-from typing import List
+import re
+from pathlib import Path
 
-all_cloud_brokerages: List[CloudBrokerage] = []
+def _capitalize(word: str) -> str:
+    """Capitalizes the given word.
 
-for json_module in json_modules:
-    if "cloud-brokerage" in json_module["type"]:
-        all_cloud_brokerages.append(CloudBrokerage(json_module))
+    :param word: the word to capitalize
+    :return: the word with the first letter capitalized (any other uppercase characters are preserved)
+    """
+    if word == "":
+        return word
+    return word[0].upper() + word[1:]
 
-[PaperTradingBrokerage] = [
-    cloud_brokerage for cloud_brokerage in all_cloud_brokerages if cloud_brokerage._id == "QuantConnectBrokerage"]
+
+def convert_to_class_name(file_path: Path):
+    """Converts the project name into a valid class name by removing all non-alphanumeric characters
+
+    :param file_path: Path to the root project
+    :return: returns a valid class name
+    """
+    return re.sub(f"[^a-zA-Z0-9]", "", "".join(map(_capitalize, file_path.name.split(" "))))

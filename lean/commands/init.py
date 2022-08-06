@@ -18,7 +18,7 @@ from pathlib import Path
 import click
 
 from lean.click import LeanCommand
-from lean.constants import DEFAULT_DATA_DIRECTORY_NAME, DEFAULT_LEAN_CONFIG_FILE_NAME, GUI_PRODUCT_SUBSCRIPTION_IDS
+from lean.constants import DEFAULT_DATA_DIRECTORY_NAME, DEFAULT_LEAN_CONFIG_FILE_NAME
 from lean.container import container
 from lean.models.errors import MoreInfoError
 
@@ -76,7 +76,7 @@ def init() -> None:
         if path.exists():
             relative_path = path.relative_to(current_dir)
             raise MoreInfoError(f"{relative_path} already exists, please run this command in an empty directory",
-                                "https://www.lean.io/docs/lean-cli/user-guides/directory-structure#02-lean-init")
+                                "https://www.lean.io/docs/lean-cli/initialization/directory-structure#02-lean-init")
 
     logger = container.logger()
 
@@ -121,24 +121,11 @@ The following objects have been created:
 - {DEFAULT_DATA_DIRECTORY_NAME}/ contains the data that is used when running the LEAN engine locally
 
 The following documentation pages may be useful:
-- Setting up local autocomplete: https://www.lean.io/docs/lean-cli/tutorials/local-autocomplete
-- Synchronizing projects with the cloud: https://www.lean.io/docs/lean-cli/tutorials/cloud-synchronization
+- Setting up local autocomplete: https://www.lean.io/docs/lean-cli/projects/autocomplete
+- Synchronizing projects with the cloud: https://www.lean.io/docs/lean-cli/projects/cloud-synchronization
 
 Here are some commands to get you going:
 - Run `lean create-project "My Project"` to create a new project with starter code
 - Run `lean cloud pull` to download all your QuantConnect projects to your local drive
 - Run `lean backtest "My Project"` to backtest a project locally with the data in {DEFAULT_DATA_DIRECTORY_NAME}/
 """.strip())
-
-    # Prompt to create a desktop shortcut for the local GUI if the user is in an organization with a subscription
-    api_client = container.api_client()
-    if api_client.is_authenticated():
-        for simple_organization in api_client.organizations.get_all():
-            organization = api_client.organizations.get(simple_organization.id)
-            modules_product = next((p for p in organization.products if p.name == "Modules"), None)
-            if modules_product is None:
-                continue
-
-            if any(i for i in modules_product.items if i.productId in GUI_PRODUCT_SUBSCRIPTION_IDS):
-                container.shortcut_manager().prompt_if_necessary(simple_organization.id)
-                break

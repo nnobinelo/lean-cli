@@ -12,7 +12,6 @@
 # limitations under the License.
 
 import json
-import os
 import re
 import uuid
 from datetime import datetime
@@ -32,9 +31,8 @@ from lean.components.util.project_manager import ProjectManager
 from lean.components.util.temp_manager import TempManager
 from lean.components.util.xml_manager import XMLManager
 from lean.constants import MODULES_DIRECTORY, TERMINAL_LINK_PRODUCT_ID
-from lean.models.config import DebuggingMethod
 from lean.models.docker import DockerImage
-
+from lean.models.utils import DebuggingMethod
 
 class LeanRunner:
     """The LeanRunner class contains the code that runs the LEAN engine locally."""
@@ -136,6 +134,11 @@ class LeanRunner:
         self._project_manager.copy_code(algorithm_file.parent, output_dir / "code")
 
         # Run the engine and log the result
+        # Run as a subprocess to capture the output before logging it
+
+        # Format error messages for cleaner output logs
+        run_options["format_output"] = self.format_error_before_logging
+        
         success = self._docker_manager.run_image(image, **run_options)
 
         cli_root_dir = self._lean_config_manager.get_cli_root_directory()
@@ -207,8 +210,7 @@ class LeanRunner:
         if not storage_dir.exists():
             storage_dir.mkdir(parents=True)
 
-        lean_config["debug-mode"] = self._logger.debug_logging_enabled \
-                                    and os.environ.get("QC_LOCAL_GUI", "false") != "true"
+        lean_config["debug-mode"] = self._logger.debug_logging_enabled
         lean_config["data-folder"] = "/Lean/Data"
         lean_config["results-destination-folder"] = "/Results"
         lean_config["object-store-root"] = "/Storage"
@@ -291,7 +293,7 @@ class LeanRunner:
             # Create a C# project used to resolve the dependencies of the modules
             run_options["commands"].append("mkdir /ModulesProject")
             run_options["commands"].append("dotnet new sln -o /ModulesProject")
-            run_options["commands"].append("dotnet new classlib -o /ModulesProject -f net5.0 --no-restore")
+            run_options["commands"].append("dotnet new classlib -o /ModulesProject -f net6.0 --no-restore")
             run_options["commands"].append("rm /ModulesProject/Class1.cs")
 
             # Add all modules to the project, automatically resolving all dependencies
@@ -305,12 +307,8 @@ class LeanRunner:
                 "python /copy_csharp_dependencies.py /Compile/obj/ModulesProject/project.assets.json")
 
         # Set up language-specific run options
-        if algorithm_file.name.endswith(".py"):
-            self.set_up_python_options(project_dir, run_options)
-        else:
-            if not set_up_common_csharp_options_called:
-                self.set_up_common_csharp_options(run_options)
-            self.set_up_csharp_options(project_dir, run_options, release)
+        self.setup_language_specific_run_options(run_options, project_dir, algorithm_file,
+                                            set_up_common_csharp_options_called, release)
 
         # Save the final Lean config to a temporary file so we can mount it into the container
         config_path = self._temp_manager.create_temporary_directory() / "config.json"
@@ -341,6 +339,16 @@ class LeanRunner:
         :param project_dir: the path to the project directory
         :param run_options: the dictionary to append run options to
         """
+
+        # Compile python files
+        source_files = self._project_manager.get_source_files(project_dir)
+        source_files = [file.relative_to(
+            project_dir).as_posix() for file in source_files]
+        source_files = [f'"/LeanCLI/{file}"' for file in source_files]
+
+        run_options["commands"].append(
+            f"python -m compileall {' '.join(source_files)}")
+            
         # Mount the project directory
         run_options["volumes"][str(project_dir)] = {
             "bind": "/LeanCLI",
@@ -452,8 +460,7 @@ class LeanRunner:
         msbuild_properties = {
             "Configuration": "Release" if release else "Debug",
             "Platform": "AnyCPU",
-            "TargetFramework": "net5.0",
-            "LangVersion": "9",
+            "TargetFramework": "net6.0",
             "OutputPath": "/Compile/bin",
             "GenerateAssemblyInfo": "false",
             "GenerateTargetFrameworkAttribute": "false",
@@ -486,8 +493,9 @@ class LeanRunner:
         run_options["commands"].append(f'dotnet build "/LeanCLI/{relative_project_file}" "-p:{msbuild_properties}"')
 
         # Copy over the algorithm DLL
-        run_options["commands"].append(
-            f'cp "/Compile/bin/{project_file.stem}.dll" "/Lean/Launcher/bin/Debug/{project_file.stem}.dll"')
+        # Copy over the project reference DLLs'
+        # Copy over all output DLLs that don't already exist in /Lean/Launcher/bin/Debug
+        run_options["commands"].append("cp -R -n /Compile/bin/. /Lean/Launcher/bin/Debug/")
 
         # Copy over all library DLLs that don't already exist in /Lean/Launcher/bin/Debug
         # CopyLocalLockFileAssemblies does not copy the OS-specific DLLs to the output directory
@@ -688,3 +696,30 @@ for library_id, library_data in project_assets["targets"][project_target].items(
 
         if len(zip_names) == 0 or (datetime.now() - datetime.strptime(zip_names[0], "%Y%m%d")).days > 7:
             lean_config[config_key] = disk_provider
+
+    def setup_language_specific_run_options(self, run_options, project_dir, algorithm_file,
+                                            set_up_common_csharp_options_called, release) -> None:
+        # Set up language-specific run options
+        if algorithm_file.name.endswith(".py"):
+            self.set_up_python_options(project_dir, run_options)
+        else:
+            if not set_up_common_csharp_options_called:
+                self.set_up_common_csharp_options(run_options)
+            self.set_up_csharp_options(project_dir, run_options, release)
+
+    def format_error_before_logging(self, chunk: str):
+        from lean.components.util import compiler
+        errors = []
+
+        # As we don't have algorithm type information. We can check errors for both
+        # Python
+        jsonString = compiler.get_errors("python", chunk)
+        jsonData = json.loads(jsonString)
+        errors.extend(jsonData["aErrors"])
+        # CSharp
+        jsonString = compiler.get_errors("csharp", chunk)
+        jsonData = json.loads(jsonString)
+        errors.extend(jsonData["aErrors"])
+
+        for error in errors:
+            self._logger.info(error)

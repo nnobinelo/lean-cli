@@ -1,30 +1,30 @@
 ![Lean CLI](http://cdn.quantconnect.com.s3.us-east-1.amazonaws.com/i/github/lean-cli-splash.png)
 
 # QuantConnect Lean CLI
-
+ 
 [![Build Status](https://github.com/QuantConnect/lean-cli/workflows/Build/badge.svg)](https://github.com/QuantConnect/lean-cli/actions?query=workflow%3ABuild)
 [![PyPI Version](https://img.shields.io/pypi/v/lean)](https://pypi.org/project/lean/)
 [![Project Status](https://img.shields.io/pypi/status/lean)](https://pypi.org/project/lean/)
 
 The Lean CLI is a cross-platform CLI aimed at making it easier to develop with the LEAN engine locally and in the cloud.
 
-Visit the [documentation website](https://www.lean.io/docs/lean-cli/getting-started/lean-cli) for comprehensive and up-to-date documentation.
+Visit the [documentation website](https://www.lean.io/docs/lean-cli/key-concepts/getting-started) for comprehensive and up-to-date documentation.
 
 ## Highlights
 
-- [Project scaffolding](https://www.lean.io/docs/lean-cli/tutorials/project-management)
-- [Local autocomplete](https://www.lean.io/docs/lean-cli/tutorials/local-autocomplete)
-- [Local data downloading](https://www.lean.io/docs/lean-cli/tutorials/local-data/downloading-from-quantconnect)
-- [Local backtesting](https://www.lean.io/docs/lean-cli/tutorials/backtesting/running-backtests#02-Running-local-backtests)
-- [Local debugging](https://www.lean.io/docs/lean-cli/tutorials/backtesting/debugging-local-backtests)
-- [Local research environment](https://www.lean.io/docs/lean-cli/tutorials/research)
-- [Local optimization](https://www.lean.io/docs/lean-cli/tutorials/optimization/local-optimizations)
-- [Local live trading](https://www.lean.io/docs/lean-cli/tutorials/live-trading/local-live-trading)
-- [Local backtest report creation](https://www.lean.io/docs/lean-cli/tutorials/generating-reports)
-- [Cloud synchronization](https://www.lean.io/docs/lean-cli/tutorials/cloud-synchronization)
-- [Cloud backtesting](https://www.lean.io/docs/lean-cli/tutorials/backtesting/running-backtests#03-Running-cloud-backtests)
-- [Cloud optimization](https://www.lean.io/docs/lean-cli/tutorials/optimization/cloud-optimizations)
-- [Cloud live trading](https://www.lean.io/docs/lean-cli/tutorials/live-trading/cloud-live-trading)
+- [Project scaffolding](https://www.lean.io/docs/lean-cli/projects/project-management)
+- [Local autocomplete](https://www.lean.io/docs/lean-cli/projects/autocomplete)
+- [Local data downloading](https://www.lean.io/docs/lean-cli/datasets/downloading-quantconnect-data)
+- [Local backtesting](https://www.lean.io/docs/lean-cli/backtesting/deployment#02-Run-Local-Backtests)
+- [Local debugging](https://www.lean.io/docs/lean-cli/backtesting/debugging)
+- [Local research environment](https://www.lean.io/docs/lean-cli/research)
+- [Local optimization](https://www.lean.io/docs/lean-cli/optimization/deployment#02-Run-Local-Optimizations)
+- [Local live trading](https://www.lean.io/docs/lean-cli/live-trading/quantconnect-paper-trading#02-Deploy-Local-Algorithms)
+- [Local backtest report creation](https://www.lean.io/docs/lean-cli/backtesting/report#02-Generate-a-Report)
+- [Cloud synchronization](https://www.lean.io/docs/lean-cli/projects/cloud-synchronization)
+- [Cloud backtesting](https://www.lean.io/docs/lean-cli/backtesting/deployment#03-Run-Cloud-Backtests)
+- [Cloud optimization](https://www.lean.io/docs/lean-cli/optimization/deployment#03-Run-Cloud-Optimizations)
+- [Cloud live trading](https://www.lean.io/docs/lean-cli/live-trading/quantconnect-paper-trading#03-Deploy-Cloud-Algorithms)
 
 ## Installation
 
@@ -32,6 +32,17 @@ The CLI can be installed and updated by running `pip install --upgrade lean`.
 
 Note that many commands in the CLI require Docker to run. See [Get Docker](https://docs.docker.com/get-docker/) for instructions on how to install Docker for your operating system.
 
+**Note:** Some Linux users may need to install `tkinter` using the following commands:
+
+``` 
+For Python 3
+
+sudo apt-get install python3-tk
+
+For Python 2.7
+
+sudo apt-get install python-tk
+```
 After installing the CLI, open a terminal in an empty directory and run `lean init`. This command downloads the latest configuration file and sample data from the [QuantConnect/Lean](https://github.com/QuantConnect/Lean) repository. We recommend running all Lean CLI commands in the same directory `lean init` was ran in.
 
 ## Usage
@@ -54,7 +65,7 @@ A locally-focused workflow (local development, local execution) with the CLI may
 
 ## Commands
 
-*Note: the readme only contains the `--help` text of all commands. Visit the [documentation website](https://www.lean.io/docs/lean-cli/getting-started/lean-cli) for more comprehensive documentation.*
+*Note: the readme only contains the `--help` text of all commands. Visit the [documentation website](https://www.lean.io/docs/lean-cli/key-concepts/getting-started) for more comprehensive documentation.*
 
 <!-- commands start -->
 - [`lean backtest`](#lean-backtest)
@@ -72,10 +83,6 @@ A locally-focused workflow (local development, local execution) with the CLI may
 - [`lean create-project`](#lean-create-project)
 - [`lean data download`](#lean-data-download)
 - [`lean data generate`](#lean-data-generate)
-- [`lean gui logs`](#lean-gui-logs)
-- [`lean gui restart`](#lean-gui-restart)
-- [`lean gui start`](#lean-gui-start)
-- [`lean gui stop`](#lean-gui-stop)
 - [`lean init`](#lean-init)
 - [`lean library add`](#lean-library-add)
 - [`lean library remove`](#lean-library-remove)
@@ -101,7 +108,7 @@ Usage: lean backtest [OPTIONS] PROJECT
   If PROJECT is a file, the algorithm in the specified file will be executed.
 
   Go to the following url to learn how to debug backtests locally using the Lean CLI:
-  https://www.lean.io/docs/lean-cli/tutorials/backtesting/debugging-local-backtests
+  https://www.lean.io/docs/lean-cli/backtesting/debugging
 
   By default the official LEAN engine image is used. You can override this using the --image option. Alternatively you
   can set the default engine image for all commands using `lean config set engine-image <image>`.
@@ -111,17 +118,16 @@ Options:
   -d, --detach                    Run the backtest in a detached Docker container and return immediately
   --debug [pycharm|ptvsd|vsdbg|rider]
                                   Enable a certain debugging method (see --help for more information)
-  --data-provider [Local|QuantConnect|Terminal Link]
+  --data-provider [Terminal Link|QuantConnect|Local]
                                   Update the Lean configuration file to retrieve data from the given provider
   --download-data                 Update the Lean configuration file to download data from the QuantConnect API, alias
                                   for --data-provider QuantConnect
-
   --data-purchase-limit INTEGER   The maximum amount of QCC to spend on downloading data during the backtest when using
                                   QuantConnect as data provider
-
   --release                       Compile C# projects in release configuration instead of debug
   --image TEXT                    The LEAN engine image to use (defaults to quantconnect/lean:latest)
   --update                        Pull the LEAN engine image before running the backtest
+  --backtest-name TEXT            Backtest name
   --lean-config FILE              The Lean configuration file that should be used (defaults to the nearest lean.json)
   --verbose                       Enable debug logging
   --help                          Show this message and exit.
@@ -152,8 +158,8 @@ Usage: lean build [OPTIONS] [ROOT]
   6. The default engine image is set to lean-cli/engine:latest.
   7. The default research image is set to lean-cli/research:latest.
 
-  When the foundation Dockerfile is the same as the official foundation Dockerfile, quantconnect/lean:foundation is
-  used instead of building a custom foundation image.
+  When the foundation Dockerfile is the same as the official foundation Dockerfile, quantconnect/lean:foundation is used
+  instead of building a custom foundation image.
 
 Options:
   --tag TEXT  The tag to apply to custom images (defaults to latest)
@@ -199,67 +205,72 @@ Usage: lean cloud live [OPTIONS] PROJECT
   PROJECT must be the name or the id of the project to start live trading for.
 
   By default an interactive wizard is shown letting you configure the deployment. If --brokerage is given the command
-  runs in non-interactive mode. In this mode the CLI does not prompt for input or confirmation. In non-interactive
-  mode the options specific to the given brokerage are required, as well as --node, --auto-restart, --notify-order-
-  events and --notify-insights.
+  runs in non-interactive mode. In this mode the CLI does not prompt for input or confirmation. In non-interactive mode
+  the options specific to the given brokerage are required, as well as --node, --auto-restart, --notify-order-events and
+  --notify-insights.
 
 Options:
-  --brokerage [Paper Trading|Interactive Brokers|Tradier|OANDA|Bitfinex|Coinbase Pro|Binance|Kraken|FTX|Zerodha|Samco]
+  --brokerage [Paper Trading|Interactive Brokers|Tradier|Oanda|Bitfinex|Coinbase Pro|Binance|Zerodha|Samco|Kraken|FTX]
                                   The brokerage to use
   --ib-user-name TEXT             Your Interactive Brokers username
   --ib-account TEXT               Your Interactive Brokers account id
   --ib-password TEXT              Your Interactive Brokers password
   --ib-data-feed BOOLEAN          Whether the Interactive Brokers price data feed must be used instead of the
                                   QuantConnect price data feed
-
   --tradier-account-id TEXT       Your Tradier account id
   --tradier-access-token TEXT     Your Tradier access token
-  --tradier-environment [demo|real]
-                                  The environment to run in, demo for the Developer Sandbox, real for live trading
+  --tradier-environment [live|paper]
+                                  Whether the developer sandbox should be used
+  --oanda-environment [Practice|Trade]
+                                  The environment to run in, Practice for fxTrade Practice, Trade for fxTrade
   --oanda-account-id TEXT         Your OANDA account id
   --oanda-access-token TEXT       Your OANDA API token
-  --oanda-environment [demo|real]
-                                  The environment to run in, demo for fxTrade Practice, real for fxTrade
   --bitfinex-api-key TEXT         Your Bitfinex API key
   --bitfinex-api-secret TEXT      Your Bitfinex API secret
+  --gdax-use-sandbox [live|paper]
+                                  Whether the sandbox should be used
   --gdax-api-key TEXT             Your Coinbase Pro API key
   --gdax-api-secret TEXT          Your Coinbase Pro API secret
   --gdax-passphrase TEXT          Your Coinbase Pro API passphrase
-  --gdax-environment [paper|live]
-                                  The environment to run in, paper for the sandbox, live for live trading
+  --binance-exchange-name [Binance|BinanceUS]
+                                  Binance exchange name [Binance, BinanceUS]
+  --binance-use-testnet [live|paper]
+                                  Whether the testnet should be used
   --binance-api-key TEXT          Your Binance API key
+  --binanceus-api-key TEXT        Your Binance API key
   --binance-api-secret TEXT       Your Binance API secret
-  --binance-environment [demo|real]
-                                  The environment to run in, demo for testnet, real for the production environment
-  --kraken-api-key TEXT           Your Kraken API key
-  --kraken-api-secret TEXT        Your Kraken API secret
-  --kraken-verification-tier TEXT
-                                  Your Kraken Verification Tier
-  --ftx-api-key TEXT              Your FTX API key
-  --ftx-api-secret TEXT           Your FTX API secret
-  --ftx-account-tier TEXT         Your FTX Account Tier
-  --ftx-exchange-name TEXT        FTX exchange name [FTX, FTXUS]
+  --binanceus-api-secret TEXT     Your Binance API secret
   --zerodha-api-key TEXT          Your Kite Connect API key
   --zerodha-access-token TEXT     Your Kite Connect access token
   --zerodha-product-type [MIS|CNC|NRML]
                                   MIS if you are targeting intraday products, CNC if you are targeting delivery
                                   products, NRML if you are targeting carry forward products
-
   --zerodha-trading-segment [EQUITY|COMMODITY]
                                   EQUITY if you are trading equities on NSE or BSE, COMMODITY if you are trading
                                   commodities on MCX
-
   --samco-client-id TEXT          Your Samco account Client ID
   --samco-client-password TEXT    Your Samco account password
   --samco-year-of-birth TEXT      Your year of birth (YYYY) registered with Samco
   --samco-product-type [MIS|CNC|NRML]
                                   MIS if you are targeting intraday products, CNC if you are targeting delivery
                                   products, NRML if you are targeting carry forward products
-
   --samco-trading-segment [EQUITY|COMMODITY]
                                   EQUITY if you are trading equities on NSE or BSE, COMMODITY if you are trading
                                   commodities on MCX
-
+  --kraken-api-key TEXT           Your Kraken API key
+  --kraken-api-secret TEXT        Your Kraken API secret
+  --kraken-verification-tier [Starter|Intermediate|Pro]
+                                  Your Kraken Verification Tier
+  --ftx-exchange-name [FTX|FTXUS]
+                                  FTX exchange name [FTX, FTXUS]
+  --ftx-api-key TEXT              Your FTX API key
+  --ftxus-api-key TEXT            Your FTX API key
+  --ftx-api-secret TEXT           Your FTX API secret
+  --ftxus-api-secret TEXT         Your FTX API secret
+  --ftx-account-tier [Tier1|Tier2|Tier3|Tier4|Tier5|Tier6|VIP1|VIP2|VIP3|MM1|MM2|MM3]
+                                  Your FTX Account Tier
+  --ftxus-account-tier [Tier1|Tier2|Tier3|Tier4|Tier5|Tier6|Tier7|Tier8|Tier9|VIP1|VIP2|MM1|MM2|MM3]
+                                  Your FTX Account Tier
   --node TEXT                     The name or id of the live node to run on
   --auto-restart BOOLEAN          Whether automatic algorithm restarting must be enabled
   --notify-order-events BOOLEAN   Whether notifications must be sent for order events
@@ -267,7 +278,6 @@ Options:
   --notify-emails TEXT            A comma-separated list of 'email:subject' pairs configuring email-notifications
   --notify-webhooks TEXT          A comma-separated list of 'url:HEADER_1=VALUE_1:HEADER_2=VALUE_2:etc' pairs
                                   configuring webhook-notifications
-
   --notify-sms TEXT               A comma-separated list of phone numbers configuring SMS-notifications
   --push                          Push local modifications to the cloud before starting live trading
   --open                          Automatically open the live results in the browser once the deployment starts
@@ -289,8 +299,8 @@ Usage: lean cloud optimize [OPTIONS] PROJECT
   PROJECT must be the name or id of the project to optimize.
 
   An interactive prompt will be shown to configure the optimizer. If --target is given the command runs in non-
-  interactive mode. In this mode the CLI does not prompt for input and the following options become required:
-  --target, --target-direction, --parameter, --node and --parallel-nodes.
+  interactive mode. In this mode the CLI does not prompt for input and the following options become required: --target,
+  --target-direction, --parameter, --node and --parallel-nodes.
 
   In non-interactive mode the --parameter option can be provided multiple times to configure multiple parameters:
   - --parameter <name> <min value> <max value> <step size>
@@ -389,8 +399,8 @@ Usage: lean config get [OPTIONS] KEY
 
   Get the current value of a configurable option.
 
-  Sensitive options like credentials cannot be retrieved this way for security reasons. Please open
-  ~/.lean/credentials if you want to see your currently stored credentials.
+  Sensitive options like credentials cannot be retrieved this way for security reasons. Please open ~/.lean/credentials
+  if you want to see your currently stored credentials.
 
   Run `lean config list` to show all available options.
 
@@ -541,7 +551,7 @@ Usage: lean data generate [OPTIONS]
 Options:
   --start [yyyyMMdd]              Start date for the data to generate in yyyyMMdd format  [required]
   --end [yyyyMMdd]                End date for the data to generate in yyyyMMdd format (defaults to today)
-  --symbol-count INTEGER RANGE    The number of symbols to generate data for  [required]
+  --symbol-count INTEGER RANGE    The number of symbols to generate data for  [x>=0; required]
   --security-type [Equity|Forex|Cfd|Future|Crypto|Option]
                                   The security type to generate data for (defaults to Equity)
   --resolution [Tick|Second|Minute|Hour|Daily]
@@ -558,77 +568,6 @@ Options:
 ```
 
 _See code: [lean/commands/data/generate.py](lean/commands/data/generate.py)_
-
-### `lean gui logs`
-
-See the logs of the local GUI.
-
-```
-Usage: lean gui logs [OPTIONS]
-
-  See the logs of the local GUI.
-
-Options:
-  -f, --follow  Update the logs in real-time while the GUI is running
-  --verbose     Enable debug logging
-  --help        Show this message and exit.
-```
-
-_See code: [lean/commands/gui/logs.py](lean/commands/gui/logs.py)_
-
-### `lean gui restart`
-
-Restart the local GUI and open it in the browser.
-
-```
-Usage: lean gui restart [OPTIONS]
-
-  Restart the local GUI and open it in the browser.
-
-Options:
-  --no-open  Skip opening the local GUI in the browser after restarting it
-  --verbose  Enable debug logging
-  --help     Show this message and exit.
-```
-
-_See code: [lean/commands/gui/restart.py](lean/commands/gui/restart.py)_
-
-### `lean gui start`
-
-Start the local GUI.
-
-```
-Usage: lean gui start [OPTIONS]
-
-  Start the local GUI.
-
-Options:
-  --organization TEXT  The name or id of the organization with the local GUI module subscription
-  --port INTEGER       The port to run the local GUI on (defaults to 5612)
-  --no-open            Skip opening the local GUI in the browser after starting it
-  --shortcut           Create a desktop shortcut for launching the local GUI
-  --lean-config FILE   The Lean configuration file that should be used (defaults to the nearest lean.json)
-  --verbose            Enable debug logging
-  --help               Show this message and exit.
-```
-
-_See code: [lean/commands/gui/start.py](lean/commands/gui/start.py)_
-
-### `lean gui stop`
-
-Stop the local GUI.
-
-```
-Usage: lean gui stop [OPTIONS]
-
-  Stop the local GUI.
-
-Options:
-  --verbose  Enable debug logging
-  --help     Show this message and exit.
-```
-
-_See code: [lean/commands/gui/stop.py](lean/commands/gui/stop.py)_
 
 ### `lean init`
 
@@ -659,12 +598,12 @@ Usage: lean library add [OPTIONS] PROJECT NAME
 
   NAME must be the name of a NuGet package (for C# projects) or of a PyPI package (for Python projects).
 
-  If --version is not given, the package is pinned to the latest compatible version. For C# projects, this is the
-  latest available version. For Python projects, this is the latest version compatible with Python 3.6 (which is what
-  the Docker images use).
+  If --version is not given, the package is pinned to the latest compatible version. For C# projects, this is the latest
+  available version. For Python projects, this is the latest version compatible with Python 3.6 (which is what the
+  Docker images use).
 
-  Custom C# libraries are added to your project's .csproj file, which is then restored if dotnet is on your PATH and
-  the --no-local flag has not been given.
+  Custom C# libraries are added to your project's .csproj file, which is then restored if dotnet is on your PATH and the
+  --no-local flag has not been given.
 
   Custom Python libraries are added to your project's requirements.txt file and are installed in your local Python
   environment so you get local autocomplete for the library. The last step can be skipped with the --no-local flag.
@@ -699,8 +638,8 @@ Usage: lean library remove [OPTIONS] PROJECT NAME
 
   NAME must be the name of the NuGet package (for C# projects) or of the PyPI package (for Python projects) to remove.
 
-  Custom C# libraries are removed from the project's .csproj file, which is then restored if dotnet is on your PATH
-  and the --no-local flag has not been given.
+  Custom C# libraries are removed from the project's .csproj file, which is then restored if dotnet is on your PATH and
+  the --no-local flag has not been given.
 
   Custom Python libraries are removed from the project's requirements.txt file.
 
@@ -730,9 +669,9 @@ Usage: lean live [OPTIONS] PROJECT
   If PROJECT is a directory, the algorithm in the main.py or Main.cs file inside it will be executed.
   If PROJECT is a file, the algorithm in the specified file will be executed.
 
-  By default an interactive wizard is shown letting you configure the brokerage and data feed to use. If
-  --environment, --brokerage or --data-feed are given the command runs in non-interactive mode. In this mode the CLI
-  does not prompt for input.
+  By default an interactive wizard is shown letting you configure the brokerage and data feed to use. If --environment,
+  --brokerage or --data-feed are given the command runs in non-interactive mode. In this mode the CLI does not prompt
+  for input.
 
   If --environment is given it must be the name of a live environment in the Lean configuration.
 
@@ -747,47 +686,54 @@ Options:
   --environment TEXT              The environment to use
   --output DIRECTORY              Directory to store results in (defaults to PROJECT/live/TIMESTAMP)
   -d, --detach                    Run the live deployment in a detached Docker container and return immediately
-  --gui                           Enable monitoring and controlling of the deployment via the local GUI
-  --gui-organization TEXT         The name or id of the organization with the local GUI module subscription
-  --brokerage [Paper Trading|Interactive Brokers|Tradier|OANDA|Bitfinex|Coinbase Pro|Binance|Zerodha|Samco|Terminal Link|Atreyu|Trading Technologies|Kraken|FTX]
+  --brokerage [Paper Trading|Interactive Brokers|Tradier|Oanda|Bitfinex|Coinbase Pro|Binance|Zerodha|Samco|Terminal Link|Atreyu|Trading Technologies|Kraken|FTX]
                                   The brokerage to use
-  --data-feed [Interactive Brokers|Tradier|OANDA|Bitfinex|Coinbase Pro|Binance|Zerodha|Samco|Terminal Link|Trading Technologies|Custom data only|Kraken|FTX|IQFeed]
+  --data-feed [Interactive Brokers|Tradier|Oanda|Bitfinex|Coinbase Pro|Binance|Zerodha|Samco|Terminal Link|Trading Technologies|Kraken|FTX|IQFeed|Polygon Data Feed|Custom data only]
                                   The data feed to use
+  --ib-organization TEXT          The name or id of the organization with the Interactive Brokers module subscription
   --ib-user-name TEXT             Your Interactive Brokers username
   --ib-account TEXT               Your Interactive Brokers account id
   --ib-password TEXT              Your Interactive Brokers password
   --ib-enable-delayed-streaming-data BOOLEAN
                                   Whether delayed data may be used when your algorithm subscribes to a security you
                                   don't have a market data subscription for
-
+  --tradier-organization TEXT     The name or id of the organization with the Tradier module subscription
   --tradier-account-id TEXT       Your Tradier account id
   --tradier-access-token TEXT     Your Tradier access token
-  --tradier-use-sandbox BOOLEAN   Whether the developer sandbox should be used
-  --oanda-account-id TEXT         Your OANDA account id
-  --oanda-access-token TEXT       Your OANDA API token
+  --tradier-environment [live|paper]
+                                  Whether the developer sandbox should be used
+  --oanda-organization TEXT       The name or id of the organization with the Oanda module subscription
   --oanda-environment [Practice|Trade]
                                   The environment to run in, Practice for fxTrade Practice, Trade for fxTrade
+  --oanda-account-id TEXT         Your OANDA account id
+  --oanda-access-token TEXT       Your OANDA API token
+  --bitfinex-organization TEXT    The name or id of the organization with the Bitfinex module subscription
   --bitfinex-api-key TEXT         Your Bitfinex API key
   --bitfinex-api-secret TEXT      Your Bitfinex API secret
+  --gdax-organization TEXT        The name or id of the organization with the Coinbase Pro module subscription
+  --gdax-use-sandbox [live|paper]
+                                  Whether the sandbox should be used
   --gdax-api-key TEXT             Your Coinbase Pro API key
   --gdax-api-secret TEXT          Your Coinbase Pro API secret
   --gdax-passphrase TEXT          Your Coinbase Pro API passphrase
-  --gdax-use-sandbox BOOLEAN      Whether the sandbox should be used
   --binance-organization TEXT     The name or id of the organization with the Binance module subscription
+  --binance-exchange-name [Binance|BinanceUS]
+                                  Binance exchange name [Binance, BinanceUS]
+  --binance-use-testnet [live|paper]
+                                  Whether the testnet should be used
   --binance-api-key TEXT          Your Binance API key
+  --binanceus-api-key TEXT        Your Binance API key
   --binance-api-secret TEXT       Your Binance API secret
-  --binance-use-testnet BOOLEAN   Whether the testnet should be used
+  --binanceus-api-secret TEXT     Your Binance API secret
   --zerodha-organization TEXT     The name or id of the organization with the zerodha module subscription
   --zerodha-api-key TEXT          Your Kite Connect API key
   --zerodha-access-token TEXT     Your Kite Connect access token
   --zerodha-product-type [MIS|CNC|NRML]
                                   MIS if you are targeting intraday products, CNC if you are targeting delivery
                                   products, NRML if you are targeting carry forward products
-
   --zerodha-trading-segment [EQUITY|COMMODITY]
                                   EQUITY if you are trading equities on NSE or BSE, COMMODITY if you are trading
                                   commodities on MCX
-
   --zerodha-history-subscription BOOLEAN
                                   Whether you have a history API subscription for Zerodha
   --samco-organization TEXT       The name or id of the organization with the samco module subscription
@@ -797,16 +743,9 @@ Options:
   --samco-product-type [MIS|CNC|NRML]
                                   MIS if you are targeting intraday products, CNC if you are targeting delivery
                                   products, NRML if you are targeting carry forward products
-
   --samco-trading-segment [EQUITY|COMMODITY]
                                   EQUITY if you are trading equities on NSE or BSE, COMMODITY if you are trading
                                   commodities on MCX
-
-  --iqfeed-iqconnect FILE         The path to the IQConnect binary
-  --iqfeed-username TEXT          Your IQFeed username
-  --iqfeed-password TEXT          Your IQFeed password
-  --iqfeed-product-name TEXT      The product name of your IQFeed developer account
-  --iqfeed-version TEXT           The product version of your IQFeed developer account
   --terminal-link-organization TEXT
                                   The name or id of the organization with the Terminal Link module subscription
   --bloomberg-environment [Production|Beta]
@@ -857,13 +796,25 @@ Options:
   --kraken-organization TEXT      The name or id of the organization with the kraken module subscription
   --kraken-api-key TEXT           Your Kraken API key
   --kraken-api-secret TEXT        Your Kraken API secret
-  --kraken-verification-tier TEXT
+  --kraken-verification-tier [Starter|Intermediate|Pro]
                                   Your Kraken Verification Tier
   --ftx-organization TEXT         The name or id of the organization with the FTX module subscription
+  --ftx-exchange-name [FTX|FTXUS]
+                                  FTX exchange name [FTX, FTXUS]
   --ftx-api-key TEXT              Your FTX API key
+  --ftxus-api-key TEXT            Your FTX API key
   --ftx-api-secret TEXT           Your FTX API secret
-  --ftx-account-tier TEXT         Your FTX Account Tier
-  --ftx-exchange-name TEXT        FTX exchange name [FTX, FTXUS]
+  --ftxus-api-secret TEXT         Your FTX API secret
+  --ftx-account-tier [Tier1|Tier2|Tier3|Tier4|Tier5|Tier6|VIP1|VIP2|VIP3|MM1|MM2|MM3]
+                                  Your FTX Account Tier
+  --ftxus-account-tier [Tier1|Tier2|Tier3|Tier4|Tier5|Tier6|Tier7|Tier8|Tier9|VIP1|VIP2|MM1|MM2|MM3]
+                                  Your FTX Account Tier
+  --iqfeed-iqconnect FILE         The path to the IQConnect binary
+  --iqfeed-username TEXT          Your IQFeed username
+  --iqfeed-password TEXT          Your IQFeed password
+  --iqfeed-productName TEXT       The product name of your IQFeed developer account
+  --iqfeed-version TEXT           The product version of your IQFeed developer account
+  --polygon-api-key TEXT          Your Polygon data feed API Key
   --release                       Compile C# projects in release configuration instead of debug
   --image TEXT                    The LEAN engine image to use (defaults to quantconnect/lean:latest)
   --update                        Pull the LEAN engine image before starting live trading
@@ -945,15 +896,15 @@ Usage: lean optimize [OPTIONS] PROJECT
   If PROJECT is a directory, the algorithm in the main.py or Main.cs file inside it will be executed.
   If PROJECT is a file, the algorithm in the specified file will be executed.
 
-  By default an interactive wizard is shown letting you configure the optimizer. If --optimizer-config or --strategy
-  is given the command runs in non-interactive mode. In this mode the CLI does not prompt for input.
+  By default an interactive wizard is shown letting you configure the optimizer. If --optimizer-config or --strategy is
+  given the command runs in non-interactive mode. In this mode the CLI does not prompt for input.
 
   The --optimizer-config option can be used to specify the configuration to run the optimizer with.
   When using the option it should point to a file like this (the algorithm-* properties should be omitted):
   https://github.com/QuantConnect/Lean/blob/master/Optimizer.Launcher/config.json
 
-  If --strategy is given the optimizer configuration is read from the given options. In this case --strategy,
-  --target, --target-direction and --parameter become required.
+  If --strategy is given the optimizer configuration is read from the given options. In this case --strategy, --target,
+  --target-direction and --parameter become required.
 
   In non-interactive mode the --parameter option can be provided multiple times to configure multiple parameters:
   - --parameter <name> <min value> <max value> <step size>
@@ -1036,19 +987,17 @@ Usage: lean research [OPTIONS] PROJECT
 
   Run a Jupyter Lab environment locally using Docker.
 
-  By default the official LEAN research image is used. You can override this using the --image option. Alternatively
-  you can set the default research image using `lean config set research-image <image>`.
+  By default the official LEAN research image is used. You can override this using the --image option. Alternatively you
+  can set the default research image using `lean config set research-image <image>`.
 
 Options:
   --port INTEGER                  The port to run Jupyter Lab on (defaults to 8888)
-  --data-provider [Local|QuantConnect|Terminal Link]
+  --data-provider [Terminal Link|QuantConnect|Local]
                                   Update the Lean configuration file to retrieve data from the given provider
   --download-data                 Update the Lean configuration file to download data from the QuantConnect API, alias
                                   for --data-provider QuantConnect
-
   --data-purchase-limit INTEGER   The maximum amount of QCC to spend on downloading data during the research session
                                   when using QuantConnect as data provider
-
   -d, --detach                    Run Jupyter Lab in a detached Docker container and return immediately
   --no-open                       Don't open the Jupyter Lab environment in the browser after starting it
   --image TEXT                    The LEAN research image to use (defaults to quantconnect/research:latest)
