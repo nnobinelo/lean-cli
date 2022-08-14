@@ -11,27 +11,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import click
 
-from lean.commands.cloud.backtest import backtest
-from lean.commands.cloud.live.live import live
-from lean.commands.cloud.optimize import optimize
-from lean.commands.cloud.pull import pull
-from lean.commands.cloud.push import push
-from lean.commands.cloud.status import status
+import json
+from decimal import Decimal
+from lean.components.util.custom_json_encoder import DecimalEncoder
 
+def test_custom_json_encoder() -> None:
 
-@click.group()
-def cloud() -> None:
-    """Interact with the QuantConnect cloud."""
-    # This method is intentionally empty
-    # It is used as the command group for all `lean cloud <command>` commands
-    pass
+    data = {
+        "symbol": "AAPL",
+        "market": "usa",
+        "security_type": "equity",
+        "quantity": Decimal("100.1235")
+    }
 
+    assert json.dumps(data, cls=DecimalEncoder) == '{"symbol": "AAPL", "market": "usa", "security_type": "equity", "quantity": "100.1235"}'
 
-cloud.add_command(pull)
-cloud.add_command(push)
-cloud.add_command(backtest)
-cloud.add_command(optimize)
-cloud.add_command(live)
-cloud.add_command(status)
