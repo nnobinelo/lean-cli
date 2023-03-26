@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import random
 from pathlib import Path
 from typing import List
 
@@ -30,6 +29,17 @@ class ProjectConfigManager:
         :param xml_manager: the XMLManager instance to use when parsing XML files
         """
         self._xml_manager = xml_manager
+
+    def try_get_project_config(self, project_directory: Path) -> Storage:
+        """Returns a Storage instance to get/set the configuration for a project.
+
+        :param project_directory: the path to the project to retrieve the configuration of
+        :return: the Storage instance containing the project-specific configuration of the given project
+        """
+        if self.get_project_config(project_directory).file.exists():
+            return Storage(str(project_directory / PROJECT_CONFIG_FILE_NAME))
+        else:
+            return False
 
     def get_project_config(self, project_directory: Path) -> Storage:
         """Returns a Storage instance to get/set the configuration for a project.
@@ -52,7 +62,8 @@ class ProjectConfigManager:
         if project_config.has("local-id"):
             return project_config.get("local-id")
 
-        project_id = random.randint(100_000_000, 999_999_999)
+        from random import randint
+        project_id = randint(100_000_000, 999_999_999)
         project_config.set("local-id", project_id)
 
         return project_id
@@ -71,10 +82,10 @@ class ProjectConfigManager:
             if not (live_dir / "log.txt").is_file():
                 continue
             return live_dir
-        
+
         raise ValueError("live directory with log.txt not found")
 
-        
+
     def get_csharp_libraries(self, project_directory: Path) -> List[CSharpLibrary]:
         """Returns the custom C# libraries in a project.
 

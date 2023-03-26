@@ -14,7 +14,7 @@
 from typing import List, Optional
 
 from lean.components.api.api_client import *
-from lean.models.api import QCCreatedProject, QCLanguage, QCProject
+from lean.models.api import QCLanguage, QCProject
 
 
 class ProjectClient:
@@ -27,51 +27,72 @@ class ProjectClient:
         """
         self._api = api_client
 
-    def get(self, project_id: int) -> QCProject:
+    def get(self, project_id: int, organization_id: Optional[str]) -> QCProject:
         """Returns the details of a project.
 
         :param project_id: the id of the project to retrieve the details of
+        :param organization_id: the id of the organization where the project is located
         :return: the details of the specified project
         """
-        data = self._api.get("projects/read", {
-            "projectId": project_id
-        })
+        payload = {"projectId": project_id}
+        if organization_id is not None:
+            payload["organizationId"] = organization_id
+
+        data = self._api.get("projects/read", payload)
 
         return self._process_project(QCProject(**data["projects"][0]))
 
-    def get_all(self) -> List[QCProject]:
+    def get_all(self, organization_id: Optional[str]) -> List[QCProject]:
         """Returns all the projects the user has access to.
 
         :return: a list containing all the projects the user has access to
+        :param organization_id: the id of the organization where the projects are located
         """
-        data = self._api.get("projects/read")
+        payload = {}
+        if organization_id is not None:
+            payload["organizationId"] = organization_id
+
+        data = self._api.get("projects/read", payload)
+
         return [self._process_project(QCProject(**project)) for project in data["projects"]]
 
-    def create(self, name: str, language: QCLanguage) -> QCCreatedProject:
+    def create(self, name: str, language: QCLanguage, organization_id: Optional[str]) -> QCProject:
         """Creates a new project.
 
         :param name: the name of the project to create
         :param language: the language of the project to create
+        :param organization_id: the id of the organization to create the project in
         :return: the created project
         """
-        data = self._api.post("projects/create", {
+        parameters = {
             "name": name,
             "language": language.value
-        })
+        }
+        if organization_id is not None:
+            parameters["organizationId"] = organization_id
+        data = self._api.post("projects/create", parameters)
 
-        return self._process_project(QCCreatedProject(**data["projects"][0]))
+        return self._process_project(QCProject(**data["projects"][0]))
 
     def update(self,
                project_id: int,
                name: Optional[str] = None,
                description: Optional[str] = None,
-               parameters: Optional[Dict[str, str]] = None) -> None:
+               parameters: Optional[Dict[str, str]] = None,
+               lean_engine: Optional[int] = None,
+               python_venv: Optional[int] = None,
+               files: Optional[List[Dict[str, str]]] = None,
+               libraries: Optional[List[int]] = None) -> None:
         """Updates an existing project.
 
         :param project_id: the id of the project to update
         :param name: the new name to assign to the project, or None if the name shouldn't be changed
         :param description: the new description to assign to the project, or None if the description shouldn't be changed
         :param parameters: the new parameters of the project, or None if the parameters shouldn't be changed
+        :param lean_engine: the lean engine id for the project, or None if the lean engine shouldn't be changed
+        :param python_venv: the python venv id for the project, or None if the python venv shouldn't be changed
+        :param files: the list of files for the project
+        :param libraries: the list of libraries referenced by the project
         """
         request_parameters = {
             "projectId": project_id
@@ -85,13 +106,32 @@ class ProjectClient:
 
         if parameters is not None:
             if len(parameters) > 0:
-                index = 0
-                for key, value in parameters.items():
+                for index, (key, value) in enumerate(parameters.items()):
                     request_parameters[f"parameters[{index}][key]"] = key
                     request_parameters[f"parameters[{index}][value]"] = value
-                    index += 1
             else:
                 request_parameters["parameters"] = ""
+
+        if lean_engine is not None:
+            request_parameters["versionId"] = lean_engine
+
+        if python_venv is not None:
+            request_parameters["leanEnvironment"] = python_venv
+
+        if files is not None:
+            if len(files) > 0:
+                for index, file in enumerate(files):
+                    request_parameters[f"files[{index}][name]"] = file["name"]
+                    request_parameters[f"files[{index}][content]"] = file["content"]
+            else:
+                request_parameters["files"] = []
+
+        if libraries is not None:
+            if len(libraries) > 0:
+                for index, library in enumerate(libraries):
+                    request_parameters[f"libraries[{index}]"] = library
+            else:
+                request_parameters["libraries"] = []
 
         self._api.post("projects/update", request_parameters, data_as_json=False)
 

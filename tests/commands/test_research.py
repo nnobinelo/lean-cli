@@ -16,10 +16,9 @@ from pathlib import Path
 from unittest import mock
 
 from click.testing import CliRunner
-from dependency_injector import providers
 
 from lean.commands import lean
-from lean.constants import DEFAULT_RESEARCH_IMAGE
+from lean.constants import DEFAULT_RESEARCH_IMAGE, LEAN_ROOT_PATH, LEAN_PYTHON_VERSION
 from lean.container import container
 from lean.models.docker import DockerImage
 from tests.test_helpers import create_fake_lean_cli_directory
@@ -30,8 +29,8 @@ RESEARCH_IMAGE = DockerImage.parse(DEFAULT_RESEARCH_IMAGE)
 def test_research_runs_research_container() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -46,8 +45,8 @@ def test_research_runs_research_container() -> None:
 def test_research_mounts_lean_config_to_notebooks_directory_as_well() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -56,19 +55,19 @@ def test_research_mounts_lean_config_to_notebooks_directory_as_well() -> None:
     docker_manager.run_image.assert_called_once()
     args, kwargs = docker_manager.run_image.call_args
 
-    lean_config = next(m["Source"] for m in kwargs["mounts"] if m["Target"] == "/Lean/Launcher/bin/Debug/config.json")
-    assert any(m["Source"] == lean_config and m["Target"] == "/Lean/Launcher/bin/Debug/Notebooks/config.json" for m in
+    lean_config = next(m["Source"] for m in kwargs["mounts"] if m["Target"] == f"{LEAN_ROOT_PATH}/config.json")
+    assert any(m["Source"] == lean_config and m["Target"] == f"{LEAN_ROOT_PATH}/Notebooks/config.json" for m in
                kwargs["mounts"])
 
 
 def test_research_adds_credentials_to_project_config() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
-    container.cli_config_manager().user_id.set_value("123")
-    container.cli_config_manager().api_token.set_value("456")
+    container.cli_config_manager.user_id.set_value("123")
+    container.cli_config_manager.api_token.set_value("456")
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -77,7 +76,7 @@ def test_research_adds_credentials_to_project_config() -> None:
     docker_manager.run_image.assert_called_once()
     args, kwargs = docker_manager.run_image.call_args
 
-    mount = [m for m in kwargs["mounts"] if m["Target"] == "/Lean/Launcher/bin/Debug/Notebooks/config.json"][0]
+    mount = [m for m in kwargs["mounts"] if m["Target"] == f"{LEAN_ROOT_PATH}/Notebooks/config.json"][0]
 
     with open(mount["Source"]) as file:
         config = json.load(file)
@@ -89,8 +88,8 @@ def test_research_adds_credentials_to_project_config() -> None:
 def test_research_mounts_data_directory() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -105,8 +104,8 @@ def test_research_mounts_data_directory() -> None:
 def test_research_mounts_project_directory() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -121,8 +120,8 @@ def test_research_mounts_project_directory() -> None:
 def test_research_exposes_8888_when_no_port_given() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -137,8 +136,8 @@ def test_research_exposes_8888_when_no_port_given() -> None:
 def test_research_exposes_custom_port_when_given() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project", "--port", "1234"])
 
@@ -154,8 +153,8 @@ def test_research_exposes_custom_port_when_given() -> None:
 def test_research_opens_browser_when_container_started(open) -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -164,10 +163,10 @@ def test_research_opens_browser_when_container_started(open) -> None:
     docker_manager.run_image.assert_called_once()
     args, kwargs = docker_manager.run_image.call_args
 
-    logs = """
+    logs = f"""
 [I 21:06:21.500 LabApp] Writing notebook server cookie secret to /root/.local/share/jupyter/runtime/notebook_cookie_secret
 [W 21:06:21.692 LabApp] All authentication is disabled.  Anyone who can connect to this server will be able to run code.
-[I 21:06:21.698 LabApp] JupyterLab extension loaded from /opt/miniconda3/lib/python3.6/site-packages/jupyterlab
+[I 21:06:21.698 LabApp] JupyterLab extension loaded from /opt/miniconda3/lib/python{LEAN_PYTHON_VERSION}/site-packages/jupyterlab
 [I 21:06:21.698 LabApp] JupyterLab application directory is /opt/miniconda3/share/jupyter/lab
 [I 21:06:21.700 LabApp] Serving notebooks from local directory: /Lean/Launcher/bin/Debug/Notebooks
 [I 21:06:21.700 LabApp] The Jupyter Notebook is running at:
@@ -184,8 +183,8 @@ def test_research_opens_browser_when_container_started(open) -> None:
 def test_research_forces_update_when_update_option_given() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
     result = CliRunner().invoke(lean, ["research", "Python Project", "--update"])
 
@@ -198,10 +197,10 @@ def test_research_forces_update_when_update_option_given() -> None:
 def test_research_runs_custom_image_when_set_in_config() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
-    container.cli_config_manager().research_image.set_value("custom/research:123")
+    container.cli_config_manager.research_image.set_value("custom/research:123")
 
     result = CliRunner().invoke(lean, ["research", "Python Project"])
 
@@ -216,10 +215,10 @@ def test_research_runs_custom_image_when_set_in_config() -> None:
 def test_research_runs_custom_image_when_given_as_option() -> None:
     create_fake_lean_cli_directory()
 
-    docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    docker_manager = mock.MagicMock()
+    container.initialize(docker_manager)
 
-    container.cli_config_manager().research_image.set_value("custom/research:123")
+    container.cli_config_manager.research_image.set_value("custom/research:123")
 
     result = CliRunner().invoke(lean, ["research", "Python Project", "--image", "custom/research:456"])
 

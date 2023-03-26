@@ -102,12 +102,12 @@ class ModuleManager:
             if product_id not in self._installed_packages:
                 self._installed_packages[product_id] = []
             self._installed_packages[product_id].append(package)
+            self._logger.debug(f"ModuleManager._download_file(): {package_file} already exists locally")
             return
 
         self._logger.info(f"Downloading '{package_file.name}'")
 
         package_file.parent.mkdir(parents=True, exist_ok=True)
-
         link = self._api_client.modules.get_link(product_id, organization_id, package_file.name)
         try:
             with self._http_client.get(link, stream=True) as response:
@@ -121,3 +121,4 @@ class ModuleManager:
         if product_id not in self._installed_packages:
             self._installed_packages[product_id] = []
         self._installed_packages[product_id].append(package)
+        self._logger.debug(f"ModuleManager._download_file(): adding {package.name} to _installed_packages")

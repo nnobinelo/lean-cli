@@ -11,42 +11,43 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import os
-import shutil
-import site
-import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import List
-
-import pkg_resources
-
+from typing import List, Optional, Union, Tuple
+from lean.components import reserved_names
 from lean.components.config.lean_config_manager import LeanConfigManager
 from lean.components.config.project_config_manager import ProjectConfigManager
+from lean.components.util.logger import Logger
+from lean.components.util.path_manager import PathManager
 from lean.components.util.platform_manager import PlatformManager
 from lean.components.util.xml_manager import XMLManager
 from lean.constants import PROJECT_CONFIG_FILE_NAME
-from lean.models.api import QCLanguage, QCProject
-
+from lean.models.api import QCLanguage, QCProject, QCProjectLibrary
+from lean.models.utils import LeanLibraryReference
 
 class ProjectManager:
     """The ProjectManager class provides utilities for handling a single project."""
 
     def __init__(self,
+                 logger: Logger,
                  project_config_manager: ProjectConfigManager,
                  lean_config_manager: LeanConfigManager,
+                 path_manager: PathManager,
                  xml_manager: XMLManager,
                  platform_manager: PlatformManager) -> None:
         """Creates a new ProjectManager instance.
 
+        :param logger: the logger to use to log messages with
         :param project_config_manager: the ProjectConfigManager to use when creating new projects
         :param lean_config_manager: the LeanConfigManager to get the CLI root directory from
+        :param path_manager: the path manager to use to handle library paths
         :param xml_manager: the XMLManager to use when working with XML
         :param platform_manager: the PlatformManager used when checking which operating system is in use
         """
+        self._logger = logger
         self._project_config_manager = project_config_manager
         self._lean_config_manager = lean_config_manager
+        self._path_manager = path_manager
         self._xml_manager = xml_manager
         self._platform_manager = platform_manager
 
@@ -89,6 +90,29 @@ class ProjectManager:
 
         raise RuntimeError(f"Project with local id '{local_id}' does not exist")
 
+    def try_get_project_path_by_cloud_id(self, cloud_id: int) -> Path:
+        """Finds a project by its cloud id.
+
+        Raises an error if a project with the given cloud id cannot be found.
+
+        :param cloud_id: the cloud id of the project
+        :return: the path to the directory containing the project with the given cloud id
+        """
+        directories = [self._lean_config_manager.get_cli_root_directory()]
+        while len(directories) > 0:
+            directory = directories.pop(0)
+
+            try:
+                project_config = self._project_config_manager.get_project_config(directory)
+            except:
+                continue
+            if project_config and project_config.get("cloud-id", None) == cloud_id:
+                return directory
+            else:
+                directories.extend(d for d in directory.iterdir() if d.is_dir())
+
+        return False
+
     def get_source_files(self, directory: Path) -> List[Path]:
         """Returns the paths of all the source files in a directory.
 
@@ -117,10 +141,13 @@ class ProjectManager:
         :param local_file_path: the path to the local file to update the last modified time of
         :param cloud_timestamp: the last modified time of the counterpart of the local file in the cloud
         """
+        from os import utime
+        from datetime import timezone
+
         # Timestamps are stored in UTC in the cloud, but utime() requires them in the local timezone
         time = cloud_timestamp.replace(tzinfo=timezone.utc).astimezone(tz=None)
         time = round(time.timestamp() * 1e9)
-        os.utime(local_file_path, ns=(time, time))
+        utime(local_file_path, ns=(time, time))
 
     def copy_code(self, project_dir: Path, output_dir: Path) -> None:
         """Copies the source code of a project to another directory.
@@ -128,12 +155,14 @@ class ProjectManager:
         :param project_dir: the directory of the project
         :param output_dir: the directory to copy the code to
         """
+        from shutil import copyfile
+
         output_dir.mkdir(parents=True, exist_ok=True)
 
         for source_file in self.get_source_files(project_dir):
             target_file = output_dir / source_file.relative_to(project_dir)
             target_file.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(source_file, target_file)
+            copyfile(source_file, target_file)
 
     def create_new_project(self, project_dir: Path, language: QCLanguage) -> None:
         """Creates a new project directory and fills it with some useful files.
@@ -157,21 +186,241 @@ class ProjectManager:
             self._generate_csproj(project_dir)
             self.generate_rider_config()
 
+    def delete_project(self, project_dir: Path) -> None:
+        """Deletes a project directory.
+
+        Raises an error if the project directory does not exist.
+
+        :param project_dir: the directory of the project to delete
+        """
+        from shutil import rmtree
+        try:
+            rmtree(project_dir)
+        except FileNotFoundError:
+            raise RuntimeError(f"Failed to delete project. Could not find the specified path {project_dir}.")
+
+
+    def get_local_project_path(self, project_name: str, cloud_id: Optional[int] = None, local_id: Optional[int] = None) -> Path:
+        """Returns the local path where a certain cloud project should be stored.
+
+        If two cloud projects are named "Project", they are pulled to ./Project and ./Project 2.
+
+        If you push a project with unsupported cloud name, a supported project name would be assigned.
+
+        :param project_name: the cloud project to get the project path of
+        :param cloud_id: the cloud project to get the project path of
+        :param local_id: the cloud project to get the project path of
+        :return: the path to the local project directory
+        """
+
+        if cloud_id is not None and local_id is not None:
+            raise ValueError("Cannot specify both cloud_id and local_id")
+
+        if cloud_id is None and local_id is None:
+            raise ValueError("Must specify either cloud_id or local_id")
+
+        local_path = self._format_local_path(project_name)
+
+        current_index = 1
+        while True:
+            path_suffix = "" if current_index == 1 else f" {current_index}"
+            current_path = Path.cwd() / (local_path + path_suffix)
+
+            if not current_path.exists():
+                return current_path
+
+            if cloud_id is not None:
+                current_project_config = self._project_config_manager.get_project_config(current_path)
+                if current_project_config.get("cloud-id") == cloud_id:
+                    return current_path
+
+            if local_id is not None:
+                current_project_config = self._project_config_manager.get_project_config(current_path)
+                if current_project_config.get("local-id") == local_id:
+                    return current_path
+
+            current_index += 1
+
+    def rename_project_and_contents(self, old_path: Path, new_path: Path,) -> None:
+        """Renames a project and updates the project config.
+
+        :param old_path: the local project to rename
+        :param new_path: the new path of the project
+        """
+        if not old_path.exists():
+            raise RuntimeError(f"Failed to rename project. Could not find the specified path {old_path}.")
+        if old_path == new_path:
+            return
+        from shutil import move
+        move(old_path, new_path)
+        self._rename_csproj_file(new_path)
+
+    def get_projects_by_name_or_id(self, cloud_projects: List[QCProject],
+                                   project: Optional[Union[str, int]]) -> List[QCProject]:
+        """Returns a list of all the projects in the cloud that match the given name or id.
+
+        :param cloud_projects: all projects fetched from the cloud
+        :param project: the name or id of the project
+        :return: a list of all the projects in the cloud that match the given name or id
+        """
+        search_by_id = isinstance(project, int)
+
+        if project is not None:
+            project_path = Path(project).as_posix() if not search_by_id else None
+            projects = [cloud_project for cloud_project in cloud_projects
+                        if (search_by_id and cloud_project.projectId == project or
+                            not search_by_id and Path(cloud_project.name).as_posix() == project_path)]
+
+            if len(projects) == 0:
+                raise RuntimeError("No project with the given name or id exists in the cloud")
+        else:
+            projects = cloud_projects
+
+        return projects
+
+    def get_project_libraries(self, project_dir: Path) -> List[Path]:
+        """Returns a list of all the libraries referenced by the given project.
+
+        It will also recursively get all the libraries referenced by each library.
+
+        :param project_dir: Path to the project
+        :return List of all the libraries referenced by the given project
+        """
+        return self._get_project_libraries(project_dir)
+
+    def _get_project_libraries(self, project_dir: Path, seen_projects: List[Path] = None) -> List[Path]:
+        """Returns a list of all the libraries referenced by the given project.
+
+        This is a helper method to recurse the libraries and get their dependencies as well.
+
+        :param project_dir: Path to the project
+        :param seen_projects: List of paths already seen, which serves as recursion stop criteria
+        :return List of all the libraries referenced by the given project
+        """
+        if seen_projects is None:
+            seen_projects = [project_dir]
+
+        project_config = self._project_config_manager.get_project_config(project_dir)
+        libraries_in_config = project_config.get("libraries", [])
+        libraries = [LeanLibraryReference(**library).path.expanduser().resolve() for library in libraries_in_config]
+        referenced_libraries = []
+
+        for library_path in libraries:
+            # Avoid infinite recursion
+            if library_path in seen_projects:
+                continue
+
+            seen_projects.append(library_path)
+            referenced_libraries.extend(self._get_project_libraries(library_path, seen_projects))
+            referenced_libraries.append(library_path)
+
+        return referenced_libraries
+
+    def restore_csharp_project(self, csproj_file: Path, no_local: bool) -> None:
+        """Restores a C# project if requested with the no_local flag and if dotnet is on the user's PATH.
+
+        :param csproj_file: Path to the project's csproj file
+        :param no_local: Whether restoring the packages locally must be skipped
+        """
+        from shutil import which
+        from subprocess import run, STDOUT, PIPE
+        from lean.models.errors import MoreInfoError
+
+        if no_local:
+            return
+
+        if which("dotnet") is None:
+            self._logger.info(f"Project {csproj_file.parent} will not be restored because dotnet was not found in PATH")
+            return
+
+        project_dir = csproj_file.parent
+        self._logger.info(f"Restoring packages in '{self._path_manager.get_relative_path(project_dir)}' "
+                          f"to provide local autocomplete")
+
+        process = run(["dotnet", "restore", str(csproj_file)], cwd=project_dir, stdout=PIPE, stderr=STDOUT, text=True)
+        self._logger.debug(process.stdout)
+
+        if process.returncode != 0:
+            raise RuntimeWarning("Something went wrong while restoring packages. "
+                                 "You might be missing the .NET Core SDK in your dotnet installation. "
+                                 "Local autocomplete functionality might be limited.")
+
+        self._logger.info("Restored successfully")
+
+    def try_restore_csharp_project(self, csproj_file: Path,
+                                   original_csproj_content: Optional[str] = None,
+                                   no_local: bool = False) -> None:
+        """Restores a C# project if requested with the no_local flag and if dotnet is on the user's PATH.
+
+        :param csproj_file: Path to the project's csproj file
+        :param original_csproj_content: The original csproj file content
+        :param no_local: Whether restoring the packages locally must be skipped
+        """
+        try:
+            self.restore_csharp_project(csproj_file, no_local)
+        except RuntimeWarning as e:
+            if original_csproj_content is not None:
+                self._logger.info(f"Reverting the changes to '{self._path_manager.get_relative_path(csproj_file)}'")
+                csproj_file.write_text(original_csproj_content, encoding="utf-8")
+            raise e
+
+
+    def _format_local_path(self, cloud_path: str) -> str:
+        """Converts the given cloud path into a local path which is valid for the current operating system.
+
+        :param cloud_path: the path of the project in the cloud
+        :return: the converted cloud_path so that it is valid locally
+        """
+        # Remove forbidden characters and OS-specific path separator that are not path separators on QuantConnect
+        # Windows, \":*?"<>| are forbidden
+        # Windows, \ is a path separator, but \ is not a path separator on QuantConnect
+        # We follow the rules of windows for every OS
+
+        for character in cloud_path:
+            if self._path_manager.is_name_valid(character):
+                continue
+            cloud_path = cloud_path.replace(character, " ")
+
+        # On Windows we need to ensure each path component is valid
+        # We follow the rules of windows for every OS
+        new_components = []
+
+        for component in cloud_path.split("/"):
+            # Some names are reserved
+            for reserved_name in reserved_names:
+                # If the component is a reserved name, we add an underscore to it so it can be used
+                if component.upper() == reserved_name:
+                    component += "_"
+
+            # Components cannot start or end with a space
+            component = component.strip(" ")
+
+            # Components cannot end with a period
+            component = component.rstrip(".")
+
+            new_components.append(component)
+
+        cloud_path = "/".join(new_components)
+
+        return cloud_path
+
+
     def _generate_python_library_projects_config(self) -> None:
         """Generates the required configuration to enable autocomplete on Python library projects."""
         try:
             cli_root_dir = self._lean_config_manager.get_cli_root_directory()
         except:
             return
+        from site import ENABLE_USER_SITE, getusersitepackages, getsitepackages
 
         library_dir = cli_root_dir / "Library"
         if not library_dir.is_dir():
             return
 
-        if site.ENABLE_USER_SITE:
-            site_packages_dir = site.getusersitepackages()
+        if ENABLE_USER_SITE:
+            site_packages_dir = getusersitepackages()
         else:
-            site_packages_dir = site.getsitepackages()[0]
+            site_packages_dir = getsitepackages()[0]
 
         self._generate_file(Path(site_packages_dir) / "lean-cli.pth", str(library_dir))
 
@@ -180,8 +429,11 @@ class ProjectManager:
 
         :param project_dir: the directory of the new project
         """
-        self._generate_file(project_dir / ".vscode" / "settings.json", json.dumps({
-            "python.pythonPath": sys.executable,
+        from sys import executable
+        from json import dumps
+
+        self._generate_file(project_dir / ".vscode" / "settings.json", dumps({
+            "python.pythonPath": executable,
             "python.languageServer": "Pylance"
         }, indent=4))
 
@@ -215,13 +467,15 @@ class ProjectManager:
         except:
             pass
 
-        self._generate_file(project_dir / ".vscode" / "launch.json", json.dumps(launch_config, indent=4))
+        self._generate_file(project_dir / ".vscode" / "launch.json", dumps(launch_config, indent=4))
 
     def _generate_pycharm_config(self, project_dir: Path) -> None:
         """Generates Python interpreter configuration and Python debugging configuration for PyCharm.
 
         :param project_dir: the directory of the new project
         """
+        from os import path
+
         # Generate Python JDK entry for PyCharm Professional and PyCharm Community
         for editor in ["PyCharm", "PyCharmCE"]:
             for directory in self._get_jetbrains_config_dirs(editor):
@@ -258,7 +512,7 @@ class ProjectManager:
 
         try:
             library_dir = self._lean_config_manager.get_cli_root_directory() / "Library"
-            library_dir = f"$PROJECT_DIR$/{os.path.relpath(library_dir, project_dir)}".replace("\\", "/")
+            library_dir = f"$PROJECT_DIR$/{path.relpath(library_dir, project_dir)}".replace("\\", "/")
             library_mapping = f'<mapping local-root="{library_dir}" remote-root="/Library" />'
         except:
             library_mapping = ""
@@ -301,6 +555,7 @@ class ProjectManager:
 
         :param pycharm_config_dir: the path to the global configuration directory of a PyCharm edition
         """
+        from sys import path, executable, version_info
         # Parse the file containing PyCharm's internal table of Python interpreters
         jdk_table_file = pycharm_config_dir / "options" / "jdk.table.xml"
         if jdk_table_file.exists():
@@ -318,7 +573,7 @@ class ProjectManager:
             return
 
         # Add the new JDK entry to the XML tree
-        classpath_entries = [Path(p).as_posix() for p in sys.path if p != "" and not p.endswith(".zip")]
+        classpath_entries = [Path(p).as_posix() for p in path if p != "" and not p.endswith(".zip")]
         classpath_entries = [f'<root url="{p}" type="simple" />' for p in classpath_entries]
         classpath_entries = "\n".join(classpath_entries)
 
@@ -327,8 +582,8 @@ class ProjectManager:
 <jdk version="2">
   <name value="Lean CLI" />
   <type value="Python SDK" />
-  <version value="Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}" />
-  <homePath value="{Path(sys.executable).as_posix()}" />
+  <version value="Python {version_info.major}.{version_info.minor}.{version_info.micro}" />
+  <homePath value="{Path(executable).as_posix()}" />
   <roots>
     <classPath>
       <root type="composite">
@@ -384,26 +639,12 @@ class ProjectManager:
 
         :param project_dir: the path of the new project
         """
-        self._generate_file(project_dir / f"{project_dir.name}.csproj", """
-<Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup>
-        <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-        <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-        <TargetFramework>net6.0</TargetFramework>
-        <OutputPath>bin/$(Configuration)</OutputPath>
-        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-        <DefaultItemExcludes>$(DefaultItemExcludes);backtests/*/code/**;live/*/code/**;optimizations/*/code/**</DefaultItemExcludes>
-        <NoWarn>CS0618</NoWarn>
-    </PropertyGroup>
-    <ItemGroup>
-        <PackageReference Include="QuantConnect.Lean" Version="2.5.*"/>
-        <PackageReference Include="QuantConnect.DataSource.Libraries" Version="2.5.*"/>
-    </ItemGroup>
-</Project>
-        """)
+        self._generate_file(project_dir / f"{project_dir.name}.csproj", self.get_csproj_file_default_content())
 
     def generate_rider_config(self) -> None:
         """Generates C# debugging configuration for Rider."""
+        from pkg_resources import resource_string
+
         ssh_dir = Path("~/.lean/ssh").expanduser()
 
         # Add SSH keys to .lean/ssh if necessary
@@ -411,7 +652,7 @@ class ProjectManager:
             ssh_dir.mkdir(parents=True)
             for name in ["key", "key.pub", "README.md"]:
                 with (ssh_dir / name).open("wb+") as file:
-                    file.write(pkg_resources.resource_string("lean", f"ssh/{name}"))
+                    file.write(resource_string("lean", f"ssh/{name}"))
 
         # Find Rider's global configuration directory
         for directory in self._get_jetbrains_config_dirs("Rider"):
@@ -469,6 +710,20 @@ class ProjectManager:
         # Save the modified XML tree
         self._generate_file(debugger_file, self._xml_manager.to_string(root))
 
+    def _rename_csproj_file(self, project_path: Path) -> None:
+        """Renames the csproj file in the project to name the project name.
+
+        :param project_path: the local project path
+        """
+        csproj_file = next(project_path.glob("*.csproj"), None)
+        if not csproj_file:
+            return
+        new_csproj_file = project_path / f'{project_path.name}.csproj'
+        if new_csproj_file.exists():
+            return
+        from shutil import move
+        move(csproj_file, new_csproj_file)
+
     def _generate_file(self, file: Path, content: str) -> None:
         """Writes to a file, which is created if it doesn't exist yet, and normalized the content before doing so.
 
@@ -514,3 +769,103 @@ class ProjectManager:
             directories.append(root_dir / editor_name)
 
         return directories
+
+    def get_cloud_project_libraries(self,
+                                    cloud_projects: List[QCProject],
+                                    project: QCProject,
+                                    seen_libraries: List[int] = None) -> Tuple[List[QCProject], List[QCProjectLibrary]]:
+        """Gets the libraries referenced by the project and its dependencies from the given cloud projects.
+
+        It recursively gets every Lean CLI library referenced by the project
+        and the ones referenced by those libraries as well.
+
+        :param cloud_projects: the cloud projects list to search in.
+        :param project: the starting point for the libraries gathering.
+        :param seen_libraries: list of seen library IDs to avoid infinite recursion.
+
+        :return: two lists including the libraries referenced by the project.
+            The first one containing the library projects that could be fetched and
+            the second list containing the libraries that could not be fetched because the user has no access to them.
+        """
+        if seen_libraries is None:
+            seen_libraries = []
+
+        libraries = [cloud_project
+                     for library in project.libraries
+                     for cloud_project in cloud_projects if cloud_project.projectId == library.projectId]
+
+        libraries_ids = [library.projectId for library in libraries]
+        libraries_not_found = [library for library in project.libraries if library.projectId not in libraries_ids]
+
+        referenced_libraries = []
+        for library in libraries:
+            # Avoid infinite recursion
+            if library.projectId in seen_libraries:
+                continue
+
+            seen_libraries.append(library.projectId)
+            libs, libs_not_found = self.get_cloud_project_libraries(cloud_projects, library, seen_libraries)
+            referenced_libraries.extend(libs)
+            libraries_not_found.extend(libs_not_found)
+
+        libraries.extend(referenced_libraries)
+
+        return list(set(libraries)), list(set(libraries_not_found))
+
+    def get_cloud_projects_libraries(self,
+                                     cloud_projects: List[QCProject],
+                                     projects: List[QCProject],
+                                     seen_projects: List[int] = None) -> Tuple[List[QCProject], List[QCProjectLibrary]]:
+        """Gets the libraries referenced by the passed projects and its dependencies from the given cloud projects.
+
+        It recursively gets every Lean CLI library referenced by the passed projects
+        and the ones referenced by those libraries as well.
+
+        :param cloud_projects: the cloud projects list to search in.
+        :param projects: the starting point list of projects for the libraries gathering.
+        :param seen_projects: list of seen project IDs to avoid infinite recursion.
+
+        :return: two lists including the libraries referenced by the projects.
+            The first one containing the library projects that could be fetched and
+            the second list containing the libraries that could not be fetched because the user has no access to them.
+        """
+        if seen_projects is None:
+            seen_projects = [project.projectId for project in projects]
+
+        libraries = []
+        libraries_not_found = []
+        for project in projects:
+            libs, libs_not_found = self.get_cloud_project_libraries(cloud_projects, project, seen_projects)
+            libraries.extend(libs)
+            libraries_not_found.extend(libs_not_found)
+
+        return list(set(libraries)), list(set(libraries_not_found))
+
+    @staticmethod
+    def get_csproj_file_default_content() -> str:
+        return """
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+        <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+        <TargetFramework>net6.0</TargetFramework>
+        <OutputPath>bin/$(Configuration)</OutputPath>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <DefaultItemExcludes>$(DefaultItemExcludes);backtests/*/code/**;live/*/code/**;optimizations/*/code/**</DefaultItemExcludes>
+        <NoWarn>CS0618</NoWarn>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="QuantConnect.Lean" Version="2.5.*"/>
+        <PackageReference Include="QuantConnect.DataSource.Libraries" Version="2.5.*"/>
+    </ItemGroup>
+</Project>
+        """
+
+    @staticmethod
+    def get_csproj_file_path(project_dir: Path) -> Path:
+        """Gets the path to the csproj file in the project directory.
+
+        :param project_dir: Path to the project directory
+        :return: Path to the csproj file in the project directory
+        """
+        return next((p for p in project_dir.iterdir() if p.name.endswith(".csproj")), None)

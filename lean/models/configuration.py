@@ -12,15 +12,14 @@
 # limitations under the License.
 
 from pathlib import Path
-import re
 from typing import Any, Dict, List
-import click
-import abc
+from click import prompt, Choice
+from abc import ABC, abstractmethod
 from lean.components.util.logger import Logger
 from lean.click import PathParameter
 
 
-class BaseCondition(abc.ABC):
+class BaseCondition(ABC):
     """Base condition class extended to all types of conditions"""
 
     def __init__(self, condition_object: Dict[str, str]):
@@ -43,7 +42,7 @@ class BaseCondition(abc.ABC):
             raise ValueError(
                 f'Undefined condition type {condition_object["type"]}')
 
-    @abc.abstractmethod
+    @abstractmethod
     def check(self, target_value: str) -> bool:
         """validates the condition against the provided values
 
@@ -74,7 +73,8 @@ class RegexCondition(BaseCondition):
         :param target_value: value to validate the condition against
         :return: True if the condition is valid otherwise False
         """
-        return len(re.findall(self._pattern, target_value, re.I)) > 0
+        from re import findall, I
+        return len(findall(self._pattern, target_value, I)) > 0
 
 
 class ConditionalValueOption():
@@ -86,19 +86,19 @@ class ConditionalValueOption():
             option_object["condition"])
 
 
-class Configuration(abc.ABC):
+class Configuration(ABC):
     """Base configuration class extended to all types of configurations"""
 
     def __init__(self, config_json_object):
         self._id: str = config_json_object["id"]
         self._config_type: str = config_json_object["type"]
         self._value: str = config_json_object["value"]
+        self._is_cloud_property: bool = "cloud-id" in config_json_object
         self._is_required_from_user = False
+        self._save_persistently_in_lean = False
         self._is_type_configurations_env: bool = type(
             self) is ConfigurationsEnvConfiguration
         self._is_type_trading_env: bool = type(self) is TradingEnvConfiguration
-        self.is_type_organization_id: bool = type(
-            self) is OrganzationIdConfiguration
         self._log_message: str = ""
         if "log-message" in config_json_object.keys():
             self._log_message = config_json_object["log-message"]
@@ -119,10 +119,10 @@ class Configuration(abc.ABC):
             return InfoConfiguration.factory(config_json_object)
         elif config_json_object["type"] in ["input", "internal-input"]:
             return UserInputConfiguration.factory(config_json_object)
-        elif config_json_object["type"] in ["filter-env", "trading-env"]:
+        elif config_json_object["type"] == "filter-env":
             return BrokerageEnvConfiguration.factory(config_json_object)
-        elif config_json_object["type"] == "organization-id":
-            return OrganzationIdConfiguration(config_json_object)
+        elif config_json_object["type"] == "trading-env":
+            return TradingEnvConfiguration.factory(config_json_object)
         else:
             raise ValueError(
                 f'Undefined input method type {config_json_object["type"]}')
@@ -173,8 +173,8 @@ class ConfigurationsEnvConfiguration(InfoConfiguration):
             env_obj["name"]: env_obj["value"] for env_obj in self._value}
 
 
-class UserInputConfiguration(Configuration, abc.ABC):
-    """Base class extended to all confiugration class than store values in Lean config.
+class UserInputConfiguration(Configuration, ABC):
+    """Base class extended to all configuration class that requires input from user.
 
     Values are expected from the user via prompts.
     Values of this configuration is persistently saved in the Lean configuration,
@@ -184,6 +184,7 @@ class UserInputConfiguration(Configuration, abc.ABC):
     def __init__(self, config_json_object):
         super().__init__(config_json_object)
         self._is_required_from_user = True
+        self._save_persistently_in_lean = True
         self._input_method = self._prompt_info = self._help = ""
         self._input_default = self._cloud_id = None
         if "input-method" in config_json_object.keys():
@@ -196,14 +197,17 @@ class UserInputConfiguration(Configuration, abc.ABC):
             self._input_default = config_json_object["input-default"]
         if "cloud-id" in config_json_object.keys():
             self._cloud_id = config_json_object["cloud-id"]
+        if "save-persistently-in-lean" in config_json_object.keys():
+            self._save_persistently_in_lean = config_json_object["save-persistently-in-lean"]
 
-    @abc.abstractmethod
-    def AskUserForInput(self, default_value: Any, logger: Logger):
+    @abstractmethod
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input
         :return: The value provided by the user.
         """
         return NotImplemented()
@@ -243,16 +247,16 @@ class InternalInputUserInput(UserInputConfiguration):
             self._is_conditional = True
         self._value_options = value_options
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input (not used for this type of input, which is never hidden).
         :return: The value provided by the user.
         """
-        raise ValueError(
-            f'user input not allowed with {self.__class__.__name__}')
+        raise ValueError(f'user input not allowed with {self.__class__.__name__}')
 
 
 class PromptUserInput(UserInputConfiguration):
@@ -268,15 +272,16 @@ class PromptUserInput(UserInputConfiguration):
         if "input-type" in config_json_object.keys():
             self._input_type = config_json_object["input-type"]
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input (not used for this type of input, which is never hidden).
         :return: The value provided by the user.
         """
-        return click.prompt(self._prompt_info, default_value, type=self.get_input_type())
+        return prompt(self._prompt_info, default_value, type=self.get_input_type())
 
     def get_input_type(self):
         return self.map_to_types.get(self._input_type, self._input_type)
@@ -289,18 +294,19 @@ class ChoiceUserInput(UserInputConfiguration):
         if "input-choices" in config_json_object.keys():
             self._choices = config_json_object["input-choices"]
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input (not used for this type of input, which is never hidden).
         :return: The value provided by the user.
         """
-        return click.prompt(
+        return prompt(
             self._prompt_info,
             default_value,
-            type=click.Choice(self._choices, case_sensitive=False)
+            type=Choice(self._choices, case_sensitive=False)
         )
 
 
@@ -308,12 +314,13 @@ class PathParameterUserInput(UserInputConfiguration):
     def __init__(self, config_json_object):
         super().__init__(config_json_object)
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input (not used for this type of input, which is never hidden).
         :return: The value provided by the user.
         """
 
@@ -324,7 +331,7 @@ class PathParameterUserInput(UserInputConfiguration):
             default_binary = Path(self._input_default)
         else:
             default_binary = ""
-        value = click.prompt(self._prompt_info,
+        value = prompt(self._prompt_info,
                              default=default_binary,
                              type=PathParameter(
                                  exists=False, file_okay=True, dir_okay=False)
@@ -336,37 +343,32 @@ class ConfirmUserInput(UserInputConfiguration):
     def __init__(self, config_json_object):
         super().__init__(config_json_object)
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input (not used for this type of input, which is never hidden).
         :return: The value provided by the user.
         """
-        return click.prompt(self._prompt_info, default_value, type=bool)
+        return prompt(self._prompt_info, default_value, type=bool)
 
 
 class PromptPasswordUserInput(UserInputConfiguration):
     def __init__(self, config_json_object):
         super().__init__(config_json_object)
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = True):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input
         :return: The value provided by the user.
         """
-        return logger.prompt_password(self._prompt_info, default_value)
-
-
-class OrganzationIdConfiguration(PromptUserInput):
-    """This class is used for job-organzation-id configurations"""
-
-    def __init__(self, config_json_object):
-        super().__init__(config_json_object)
+        return logger.prompt_password(self._prompt_info, default_value, hide_input=hide_input)
 
 
 class BrokerageEnvConfiguration(PromptUserInput, ChoiceUserInput, ConfirmUserInput):
@@ -379,50 +381,61 @@ class BrokerageEnvConfiguration(PromptUserInput, ChoiceUserInput, ConfirmUserInp
         """Creates an instance of the child classes.
 
         :param config_json_object: the json object dict with configuration info
-        :return: An instance of BrokerageEnvConfiguration.
+        :return: An instance of BrokerageEnvConfiguration
         """
-        if config_json_object["type"] == "trading-env":
-            return TradingEnvConfiguration(config_json_object)
-        elif config_json_object["type"] == "filter-env":
+        if config_json_object["type"] == "filter-env":
             return FilterEnvConfiguration(config_json_object)
         else:
             raise ValueError(
                 f'Undefined input method type {config_json_object["type"]}')
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input (not used for this type of input, which is never hidden).
         :return: The value provided by the user.
         """
         if self._input_method == "confirm":
-            return ConfirmUserInput.AskUserForInput(self, default_value, logger)
+            return ConfirmUserInput.ask_user_for_input(self, default_value, logger)
         elif self._input_method == "choice":
-            return ChoiceUserInput.AskUserForInput(self, default_value, logger)
+            return ChoiceUserInput.ask_user_for_input(self, default_value, logger)
         elif self._input_method == "prompt":
-            return PromptUserInput.AskUserForInput(self, default_value, logger)
+            return PromptUserInput.ask_user_for_input(self, default_value, logger)
         else:
-            raise ValueError(
-                f"Undefined input method type {self._input_method}")
+            raise ValueError(f"Undefined input method type {self._input_method}")
 
 
-class TradingEnvConfiguration(BrokerageEnvConfiguration):
+class TradingEnvConfiguration(PromptUserInput, ChoiceUserInput, ConfirmUserInput):
     """This class adds trading-mode/envirionment based user filters.
-    
-    Normalizes the value of envrionment values(live/paper) for cloud live. 
+
+    Normalizes the value of envrionment values(live/paper) for cloud live.
     """
 
     def __init__(self, config_json_object):
         super().__init__(config_json_object)
 
-    def AskUserForInput(self, default_value, logger: Logger):
+    def factory(config_json_object) -> 'TradingEnvConfiguration':
+        """Creates an instance of the child classes.
+
+        :param config_json_object: the json object dict with configuration info
+        :return: An instance of TradingEnvConfiguration.
+        """
+        if config_json_object["type"] == "trading-env":
+            return TradingEnvConfiguration(config_json_object)
+        else:
+            raise ValueError(
+                f'Undefined input method type {config_json_object["type"]}')
+
+    def ask_user_for_input(self, default_value, logger: Logger, hide_input: bool = False):
         """Prompts user to provide input while validating the type of input
         against the expected type
 
         :param default_value: The default to prompt to the user.
         :param logger: The instance of logger class.
+        :param hide_input: Whether to hide the input (not used for this type of input, which is never hidden).
         :return: The value provided by the user.
         """
         # NOTE: trading envrionment config should not use old boolean value as default
@@ -432,7 +445,7 @@ class TradingEnvConfiguration(BrokerageEnvConfiguration):
             raise ValueError(
                 f'input method -- {self._input_method} is not allowed with {self.__class__.__name__}')
         else:
-            return BrokerageEnvConfiguration.AskUserForInput(self, default_value, logger)
+            return BrokerageEnvConfiguration.ask_user_for_input(self, default_value, logger)
 
 
 class FilterEnvConfiguration(BrokerageEnvConfiguration):

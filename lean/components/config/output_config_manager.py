@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import random
 from pathlib import Path
 from typing import List, Optional
 
@@ -37,13 +36,14 @@ class OutputConfigManager:
         """
         return Storage(str(output_directory / "config"))
 
-    def get_backtest_id(self, backtest_directory: Path) -> int:
+    def get_backtest_id(self, backtest_directory: Path, backtest_id: int = None) -> int:
         """Returns the id of a backtest.
 
         :param backtest_directory: the path to the backtest to retrieve the id of
+        :param backtest_id: the id that needs to be set in the config file
         :return: the id of the given backtest
         """
-        return self._get_id(backtest_directory, 1)
+        return self._get_id(backtest_directory, 1, backtest_id)
 
     def get_backtest_name(self, backtest_directory: Path) -> str:
         """Returns the name of a backtest.
@@ -97,13 +97,14 @@ class OutputConfigManager:
         """
         return self._get_by_id("Optimization", optimization_id, ["optimizations/*"], root_directory)
 
-    def get_live_deployment_id(self, live_deployment_directory: Path) -> int:
+    def get_live_deployment_id(self, live_deployment_directory: Path, live_deployment_id: int = None) -> int:
         """Returns the id of a live deployment.
 
         :param live_deployment_directory: the path to the live deployment to retrieve the id of
+        :param live_deployment_id: the id that needs to be set in the config file
         :return: the id of the given optimization
         """
-        return self._get_id(live_deployment_directory, 3)
+        return self._get_id(live_deployment_directory, 3, live_deployment_id)
 
     def get_live_deployment_by_id(self, live_deployment_id: int, root_directory: Optional[Path] = None) -> Path:
         """Finds the directory of a live deployment by its id.
@@ -114,13 +115,50 @@ class OutputConfigManager:
         """
         return self._get_by_id("Live deployment", live_deployment_id, ["live/*"], root_directory)
 
-    def _get_id(self, output_directory: Path, prefix: int) -> int:
+    def get_latest_output_directory(self, environment: str) -> Optional[Path]:
+        """Finds the latest output directory for the given environment (live or backtests)
+
+        :param environment: The environment to find the latest output directory for (live or backtests)
+        :return: The path to the latest output directory for the given environment
+        :raises RuntimeError: If no output directory is found for the given environment
+        """
+        output_json_files = sorted(Path.cwd().rglob(f"{environment}/*/*.json"),
+                                   key=lambda d: d.stat().st_mtime,
+                                   reverse=True)
+
+        if len(output_json_files) == 0:
+            return None
+
+        return output_json_files[0].parent
+
+    def get_output_id(self, output_directory: Path) -> Optional[int]:
+        """Returns the id of an output, regardless of whether it is a backtest or a live deployment.
+
+        It will return None if the output directory does not contain any output with an existing id.
+
+        :param output_directory: the path to the output to retrieve the id of
+        :return: the id of the given output
+        """
+        output_id = self._get_id(output_directory, 9)
+
+        if str(output_id)[0] == '9':
+            # no existing id was found
+            return None
+
+        return output_id
+
+    def _get_id(self, output_directory: Path, prefix: int, id: int = None) -> int:
         config = self.get_output_config(output_directory)
 
+        if id is not None:
+            config.set("id", id)
+            return id
+        
         if config.has("id"):
             return config.get("id")
 
-        new_id = int(str(prefix) + str(random.randint(100_000_000, 999_999_999)))
+        from random import randint
+        new_id = int(str(prefix) + str(randint(100_000_000, 999_999_999)))
         config.set("id", new_id)
 
         return new_id

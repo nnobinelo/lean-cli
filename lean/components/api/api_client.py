@@ -11,20 +11,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import traceback
-from hashlib import sha256
-from time import time
 from typing import Any, Dict
-from urllib.parse import urljoin
 
-import requests
-
-import lean
 from lean.components.api.account_client import AccountClient
 from lean.components.api.backtest_client import BacktestClient
 from lean.components.api.compile_client import CompileClient
 from lean.components.api.data_client import DataClient
 from lean.components.api.file_client import FileClient
+from lean.components.api.lean_client import LeanClient
 from lean.components.api.live_client import LiveClient
 from lean.components.api.market_client import MarketClient
 from lean.components.api.module_client import ModuleClient
@@ -53,8 +47,7 @@ class APIClient:
         """
         self._logger = logger
         self._http_client = http_client
-        self._user_id = user_id
-        self._api_token = api_token
+        self.set_user_token(user_id, api_token)
 
         # Create the clients containing the methods to send requests to the various API endpoints
         self.accounts = AccountClient(self)
@@ -71,6 +64,11 @@ class APIClient:
         self.projects = ProjectClient(self)
         self.services = ServiceClient(self)
         self.users = UserClient(self)
+        self.lean = LeanClient(self)
+
+    def set_user_token(self, user_id: str, api_token: str):
+        self._user_id = user_id
+        self._api_token = api_token
 
     def get(self, endpoint: str, parameters: Dict[str, Any] = {}) -> Any:
         """Makes an authenticated GET request to the given endpoint with the given parameters.
@@ -105,7 +103,8 @@ class APIClient:
             self.get("authenticate")
             return True
         except (RequestFailedError, AuthenticationError):
-            self._logger.debug(traceback.format_exc().strip())
+            from traceback import format_exc
+            self._logger.debug(format_exc().strip())
             return False
 
     def _request(self, method: str, endpoint: str, options: Dict[str, Any] = {}, retry_http_5xx: bool = True) -> Any:
@@ -117,6 +116,11 @@ class APIClient:
         :param retry_http_5xx: True if the request should be retried on an HTTP 5xx response, False if not
         :return: the parsed response of the request
         """
+        from hashlib import sha256
+        from urllib.parse import urljoin
+        from lean import __version__
+        from time import time
+
         full_url = urljoin(API_BASE_URL, endpoint)
 
         # Create the hash which is used to authenticate the user to the API
@@ -127,8 +131,8 @@ class APIClient:
             "Timestamp": timestamp
         }
 
-        version = lean.__version__
-        if lean.__version__ == 'dev':
+        version = __version__
+        if __version__ == 'dev':
             version = 99999999
         headers["User-Agent"] = f"Lean CLI {version}"
 
@@ -138,6 +142,9 @@ class APIClient:
                                              auth=(self._user_id, password),
                                              raise_for_status=False,
                                              **options)
+
+        if self._logger.debug_logging_enabled:
+            self._logger.debug(f"Request response: {response.text}")
 
         if 500 <= response.status_code < 600 and retry_http_5xx:
             return self._request(method, endpoint, options, False)
@@ -150,7 +157,7 @@ class APIClient:
 
         return self._parse_response(response)
 
-    def _parse_response(self, response: requests.Response) -> Any:
+    def _parse_response(self, response) -> Any:
         """Parses the data in a response.
 
         Raises an error if the data in the response indicates something went wrong.
@@ -168,7 +175,9 @@ class APIClient:
         if "errors" in data and len(data["errors"]) > 0:
             if data["errors"][0].startswith("Hash doesn't match."):
                 raise AuthenticationError()
-
+            if data["errors"][0].startswith('UserID not valid'):
+                data["errors"].append('Please login to your account with "lean login". '
+                                      'https://www.quantconnect.com/docs/v2/lean-cli/api-reference/lean-login')
             raise RequestFailedError(response, "\n".join(data["errors"]))
 
         if "messages" in data and len(data["messages"]) > 0:

@@ -13,20 +13,41 @@
 
 from pathlib import Path
 from unittest import mock
+from datetime import datetime
 
 from click.testing import CliRunner
-from dependency_injector import providers
 
 from lean.commands import lean
-from lean.container import container
-from tests.test_helpers import create_fake_lean_cli_directory
+from lean.components.cloud.push_manager import PushManager
+from lean.models.api import QCFullFile
+from tests.test_helpers import create_fake_lean_cli_directory, create_api_project
+from tests.conftest import initialize_container
+
+
+def init_container(**kwargs) -> None:
+    organization_manager = mock.Mock()
+    organization_manager.get_working_organization_id = mock.MagicMock(return_value="abc")
+
+    if "organization_manager_to_use" not in kwargs:
+        kwargs["organization_manager_to_use"] = organization_manager
+
+    initialize_container(**kwargs)
 
 
 def test_cloud_push_pushes_all_projects_when_no_options_given() -> None:
     create_fake_lean_cli_directory()
 
+    cloud_projects = [
+        create_api_project(1, "Python Project"),
+        create_api_project(2, "CSharp Project"),
+        create_api_project(3, "Library/Python Library"),
+        create_api_project(4, "Library/CSharp Library")
+    ]
+    api_client = mock.Mock()
+    api_client.projects.get_all = mock.MagicMock(return_value=cloud_projects)
+
     push_manager = mock.Mock()
-    container.push_manager.override(providers.Object(push_manager))
+    init_container(api_client_to_use=api_client, push_manager_to_use=push_manager)
 
     result = CliRunner().invoke(lean, ["cloud", "push"])
 
@@ -35,27 +56,38 @@ def test_cloud_push_pushes_all_projects_when_no_options_given() -> None:
     push_manager.push_projects.assert_called_once()
     args, kwargs = push_manager.push_projects.call_args
 
-    assert set(args[0]) == {Path.cwd() / "Python Project", Path.cwd() / "CSharp Project"}
+    expected_args = {
+        Path.cwd() / "Python Project",
+        Path.cwd() / "CSharp Project",
+        Path.cwd() / "Library/Python Library",
+        Path.cwd() / "Library/CSharp Library"
+    }
+
+    assert set(args[0]) == expected_args
 
 
 def test_cloud_push_pushes_single_project_when_project_option_given() -> None:
     create_fake_lean_cli_directory()
 
+    cloud_projects = [create_api_project(1, "Python Project")]
+    api_client = mock.Mock()
+    api_client.projects.get_all = mock.MagicMock(return_value=cloud_projects)
+
     push_manager = mock.Mock()
-    container.push_manager.override(providers.Object(push_manager))
+    init_container(api_client_to_use=api_client, push_manager_to_use=push_manager)
 
     result = CliRunner().invoke(lean, ["cloud", "push", "--project", "Python Project"])
 
     assert result.exit_code == 0
 
-    push_manager.push_projects.assert_called_once_with([Path.cwd() / "Python Project"])
+    push_manager.push_project.assert_called_once_with(Path.cwd() / "Python Project")
 
 
 def test_cloud_push_aborts_when_given_directory_is_not_lean_project() -> None:
     create_fake_lean_cli_directory()
 
     push_manager = mock.Mock()
-    container.push_manager.override(providers.Object(push_manager))
+    init_container(push_manager_to_use=push_manager)
 
     (Path.cwd() / "Empty Project").mkdir()
 
@@ -70,10 +102,45 @@ def test_cloud_push_aborts_when_given_directory_does_not_exist() -> None:
     create_fake_lean_cli_directory()
 
     push_manager = mock.Mock()
-    container.push_manager.override(providers.Object(push_manager))
+    init_container(push_manager_to_use=push_manager)
 
     result = CliRunner().invoke(lean, ["cloud", "push", "--project", "Empty Project"])
 
     assert result.exit_code != 0
 
     push_manager.push_projects.assert_not_called()
+
+
+def test_cloud_push_updates_lean_config() -> None:
+
+    create_fake_lean_cli_directory()
+
+    cloud_project = create_api_project(1, "Python Project")
+    api_client = mock.Mock()
+    api_client.projects.create = mock.MagicMock(return_value=cloud_project)
+    fake_cloud_files = [QCFullFile(name="removed_file.py", content="", modified=datetime.now(), isLibrary=False)]
+    api_client.files.get_all = mock.MagicMock(return_value=fake_cloud_files)
+    api_client.files.delete = mock.Mock()
+
+    api_client.projects.get_all = mock.MagicMock(return_value=[cloud_project])
+    api_client.projects.get = mock.MagicMock(return_value=create_api_project(1, "Python Project"))
+
+    project_config = mock.Mock()
+    project_config.get = mock.MagicMock(side_effect=[None, "Python", "", {}, -1, None, []])
+
+    project_config_manager = mock.Mock()
+    project_config_manager.get_project_config = mock.MagicMock(return_value=project_config)
+
+    project_manager = mock.Mock()
+    project_manager.get_source_files = mock.MagicMock(return_value=[])
+    project_manager.get_project_libraries = mock.MagicMock(return_value=[])
+
+    push_manager = PushManager(mock.Mock(), api_client, project_manager, project_config_manager, mock.Mock())
+
+    init_container(push_manager_to_use=push_manager, api_client_to_use=api_client)
+
+    result = CliRunner().invoke(lean, ["cloud", "push", "--project", "Python Project"])
+
+    assert result.exit_code == 0
+
+    project_config.set.assert_called_with("organization-id", "123")

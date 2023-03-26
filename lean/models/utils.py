@@ -12,6 +12,8 @@
 # limitations under the License.
 
 from enum import Enum
+from pathlib import Path
+
 from lean.models.pydantic import WrappedBaseModel
 
 class DebuggingMethod(Enum):
@@ -20,6 +22,7 @@ class DebuggingMethod(Enum):
     PTVSD = 2
     VSDBG = 3
     Rider = 4
+    LocalPlatform  = 5
 
     def get_internal_name(self) -> str:
         """Returns the LEAN debugging method that should be used for the current enum member.
@@ -28,10 +31,18 @@ class DebuggingMethod(Enum):
         """
         return {
             DebuggingMethod.PyCharm: "PyCharm",
-            DebuggingMethod.PTVSD: "PTVSD"
+            DebuggingMethod.PTVSD: "PTVSD",
+            DebuggingMethod.LocalPlatform: "DebugPy" # QC -> DebugPy, If its Python it uses DebugPy, if its C# LEAN safely ignores DebugPy
         }.get(self, "LocalCmdline")
+
 
 class CSharpLibrary(WrappedBaseModel):
     """The information of a PackageReference tag in a .csproj file."""
     name: str
     version: str
+
+
+class LeanLibraryReference(WrappedBaseModel):
+    """The information of a library reference in a project's config.json file"""
+    name: str
+    path: Path

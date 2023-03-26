@@ -12,12 +12,15 @@
 # limitations under the License.
 
 from pathlib import Path
-import click
+from click import Choice, option, argument
+
 from lean.click import LeanCommand
+from lean.commands import lean
 from lean.container import container
 from lean.models.api import QCLanguage
 from lean.models.errors import MoreInfoError
 from lean.components.util.name_extraction import convert_to_class_name
+from lean.components import reserved_names
 
 DEFAULT_PYTHON_MAIN = '''
 from AlgorithmImports import *
@@ -113,7 +116,7 @@ DEFAULT_PYTHON_NOTEBOOK = """
             "name": "python",
             "nbconvert_exporter": "python",
             "pygments_lexer": "ipython3",
-            "version": "3.6.8"
+            "version": "3.8.13"
         }
     },
     "nbformat": 4,
@@ -157,7 +160,7 @@ namespace QuantConnect
     {
         /*
          * To use this library, first add it to a solution and create a project reference in your algorithm project:
-         * https://www.lean.io/docs/lean-cli/projects/libraries/project-libraries#02-C-Libraries
+         * https://www.lean.io/docs/v2/lean-cli/projects/libraries/project-libraries#02-C-Libraries
          *
          * Then add its namespace at the top of the page:
          * using QuantConnect;
@@ -259,11 +262,19 @@ DEFAULT_CSHARP_NOTEBOOK = """
 }
 """.strip() + "\n"
 
+def _not_identifier_char(text):
+    problematic_char = text[-1]
+    for i in range(1, len(text)):
+        substring = text[:i]
+        if not substring.isidentifier():
+            problematic_char = substring[-1]
+            break
+    return problematic_char
 
-@click.command(cls=LeanCommand)
-@click.argument("name", type=str)
-@click.option("--language", "-l",
-              type=click.Choice(container.cli_config_manager().default_language.allowed_values, case_sensitive=False),
+@lean.command(cls=LeanCommand, name="project-create", aliases=["create-project"])
+@argument("name", type=str)
+@option("--language", "-l",
+              type=Choice(container.cli_config_manager.default_language.allowed_values, case_sensitive=False),
               help="The language of the project to create")
 def create_project(name: str, language: str) -> None:
     """Create a new project containing starter code.
@@ -272,36 +283,47 @@ def create_project(name: str, language: str) -> None:
 
     The default language can be set using `lean config set default-language python/csharp`.
     """
-    cli_config_manager = container.cli_config_manager()
+    cli_config_manager = container.cli_config_manager
 
     language = language if language is not None else cli_config_manager.default_language.get_value()
     if language is None:
         raise MoreInfoError(
             "Please specify a language with --language or set the default language using `lean config set default-language python/csharp`",
-            "https://www.lean.io/docs/lean-cli/projects/project-management")
+            "https://www.lean.io/docs/v2/lean-cli/projects/project-management")
 
     full_path = Path.cwd() / name
+    try:
+        cli_root_dir = container.lean_config_manager.get_cli_root_directory()
+        relative_path = full_path.relative_to(cli_root_dir).as_posix()
+    except MoreInfoError:
+        relative_path = name
 
-    if not container.path_manager().is_path_valid(full_path):
-        raise MoreInfoError(f"'{name}' is not a valid path",
-                            "https://www.lean.io/docs/lean-cli/key-concepts/troubleshooting#02-Common-Errors")
+    if not container.path_manager.is_cli_path_valid(full_path) or not container.path_manager.is_name_valid(relative_path):
+        raise MoreInfoError(f"Invalid project name. Can only contain letters, numbers & spaces. Can not start with empty char ' ' or be a reserved name [ {', '.join(reserved_names)} ]",
+                         "https://www.lean.io/docs/v2/lean-cli/key-concepts/troubleshooting#02-Common-Errors")
 
     is_library_project = False
     try:
-        library_dir = container.lean_config_manager().get_cli_root_directory() / "Library"
+        library_dir = container.lean_config_manager.get_cli_root_directory() / "Library"
         is_library_project = library_dir in full_path.parents
+        if is_library_project:
+            # Make sure we always use the same casing 'Library' for the library directory
+            full_path = library_dir / full_path.relative_to(library_dir)
     except:
         # get_cli_root_directory() raises an error if there is no such directory
         pass
 
-    if is_library_project and language == "python" and not full_path.name.isidentifier():
+    id_name = full_path.name
+    if is_library_project and language == "python" and not id_name.isidentifier():
+        problematic_char = _not_identifier_char(id_name)
         raise RuntimeError(
-            f"'{full_path.name}' is not a valid Python identifier, which is required for Python library projects to be importable")
+            f"""'{id_name}' is not a valid Python identifier, which is required for Python library projects to be importable.
+Please remove the character '{problematic_char}' and retry""")
 
     if full_path.exists():
         raise RuntimeError(f"A project named '{name}' already exists, please choose a different name")
     else:
-        project_manager = container.project_manager()
+        project_manager = container.project_manager
         project_manager.create_new_project(full_path, QCLanguage.Python if language == "python" else QCLanguage.CSharp)
 
     class_name = convert_to_class_name(full_path)
@@ -319,5 +341,11 @@ def create_project(name: str, language: str) -> None:
     with (full_path / "research.ipynb").open("w+", encoding="utf-8") as file:
         file.write(DEFAULT_PYTHON_NOTEBOOK if language == "python" else DEFAULT_CSHARP_NOTEBOOK)
 
-    logger = container.logger()
+    if language == "csharp":
+        project_manager = container.project_manager
+        project_csproj_file = project_manager.get_csproj_file_path(full_path)
+        original_csproj_content = project_csproj_file.read_text(encoding="utf-8")
+        project_manager.try_restore_csharp_project(project_csproj_file, original_csproj_content, False)
+
+    logger = container.logger
     logger.info(f"Successfully created {'Python' if language == 'python' else 'C#'} project '{name}'")

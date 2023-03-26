@@ -13,17 +13,20 @@
 
 from pathlib import Path
 
+from lean.components import reserved_names, forbidden_characters
+from lean.components.config.lean_config_manager import LeanConfigManager
 from lean.components.util.platform_manager import PlatformManager
 
 
 class PathManager:
     """The PathManager class provides utilities for working with paths."""
 
-    def __init__(self, platform_manager: PlatformManager) -> None:
+    def __init__(self, lean_config_manager: LeanConfigManager, platform_manager: PlatformManager) -> None:
         """Creates a new PathManager instance.
 
         :param platform_manager: the PlatformManager used when checking which operating system is in use
         """
+        self._lean_config_manager = lean_config_manager
         self._platform_manager = platform_manager
 
     def get_relative_path(self, destination: Path, source: Path = Path.cwd()) -> Path:
@@ -38,8 +41,21 @@ class PathManager:
         except ValueError:
             return destination
 
+    def is_name_valid(self, name: str) -> bool:
+        """Returns whether a name is valid on Windows operating system.
+
+        :param name: the name to validate
+        :return: True if the name is valid on Windows operating system, False if not
+        """
+        import re
+        return re.match(r'^[-_a-zA-Z0-9/\s]*$', name) is not None
+
     def is_path_valid(self, path: Path) -> bool:
-        """Returns whether a path is valid on the current operating system.
+        """Returns whether the given path is a valid project path in the current operating system.
+
+        This method should only be used to check paths relative to the current lean init folder.
+        Passing an absolute path might result in false being returned since especial cases for root directories
+        for each operating system (like devices in Windows) are not validated.
 
         :param path: the path to validate
         :return: True if the path is valid on the current operating system, False if not
@@ -52,20 +68,40 @@ class PathManager:
 
         # On Windows path.exists() doesn't throw for paths like CON/file.txt
         # Trying to create them does raise errors, so we manually validate path components
-        if self._platform_manager.is_system_windows():
-            # Skip the first component, which contains the drive name
-            for component in path.as_posix().split("/")[1:]:
-                if component.startswith(" ") or component.endswith(" ") or component.endswith("."):
+        # We follow the rules of windows for every OS
+        components = path.as_posix().split("/")
+        for component in components:
+            if component.startswith(" ") or component.endswith(" ") or component.endswith("."):
+                return False
+
+            for reserved_name in reserved_names:
+                if component.upper() == reserved_name or component.upper().startswith(reserved_name + "."):
                     return False
 
-                for reserved_name in ["CON", "PRN", "AUX", "NUL",
-                                      "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-                                      "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"]:
-                    if component.upper() == reserved_name or component.upper().startswith(reserved_name + "."):
-                        return False
-
-                for forbidden_character in [":", "*", "?", '"', "<", ">", "|"]:
-                    if forbidden_character in component:
-                        return False
-
+            for forbidden_character in forbidden_characters:
+                if forbidden_character in component:
+                    return False
         return True
+
+    def is_cli_path_valid(self, path: Path) -> bool:
+        """Returns whether the given path is a valid project path in the current operating system.
+
+        :param path: the path to validate
+        :return: True if the path is valid on the current operating system, False if not
+        """
+        from lean.models.errors import MoreInfoError
+
+        relative_path = path
+
+        try:
+            cli_root_dir = self._lean_config_manager.get_cli_root_directory()
+            relative_path = path.relative_to(cli_root_dir)
+        except (MoreInfoError, ValueError):
+            from platform import system
+            if system() == "Windows":
+                # Skip the first component, which contains the drive name
+                posix_path = path.as_posix()
+                first_separator_index = posix_path.find('/')
+                relative_path = Path(posix_path[first_separator_index:] if first_separator_index != -1 else path)
+
+        return relative_path == Path(".") or self.is_path_valid(relative_path)

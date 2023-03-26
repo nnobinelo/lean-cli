@@ -11,21 +11,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
+from json import dumps
 from typing import Dict, Any
 from lean.container import container
-import sys
-import io
-from contextlib import redirect_stdout
-import re
+from pathlib import Path
 
-docker_manager = container.docker_manager()
-project_manager = container.project_manager()
-lean_runner = container.lean_runner()
-temp_manager = container.temp_manager()
-project_config_manager = container.project_config_manager()
-cli_config_manager = container.cli_config_manager()
-logger = container.logger()
+docker_manager = container.docker_manager
+project_manager = container.project_manager
+lean_runner = container.lean_runner
+temp_manager = container.temp_manager
+project_config_manager = container.project_config_manager
+cli_config_manager = container.cli_config_manager
+logger = container.logger
 
 
 def get_success() -> Dict[str, Any]:
@@ -33,7 +30,7 @@ def get_success() -> Dict[str, Any]:
 
     :return: success object as json dump.
     """
-    return json.dumps({
+    return dumps({
         "eType": "BuildSuccess",
     })
 
@@ -52,7 +49,7 @@ def get_errors(algorithm_type: str, message: str, color_coding_required: bool = 
     elif algorithm_type == "python":
         errors.extend(_parse_python_errors(message, color_coding_required))
 
-    return json.dumps({
+    return dumps({
         "eType": "BuildError",
         "aErrors": errors,
     })
@@ -64,7 +61,9 @@ def redirect_stdout_of_subprocess(method_name_to_run, *args, **kwargs) -> tuple:
     :param method_name_to_run: name of the method to run
     :return: result of the method and the stdout of the process
     """
-    f = io.StringIO()
+    from io import StringIO
+    from contextlib import redirect_stdout
+    f = StringIO()
     with redirect_stdout(f):
         result = method_name_to_run(*args, **kwargs)
     stdout = f.getvalue()
@@ -76,7 +75,7 @@ def compile() -> None:
     """
 
     # We need to print the stdout of the docker run command from here,
-    # so that it can be picked up by the subprocess that is being 
+    # so that it can be picked up by the subprocess that is being
     # called by the vscode plugin.
     compile_result, stdout = redirect_stdout_of_subprocess(_compile)
     if compile_result["result"]:
@@ -90,13 +89,17 @@ def _compile() -> Dict[str, Any]:
     """
     This function compile c# and python project files.
     """
+    from sys import argv
+
     message = {
         "result": False,
         "algorithmType": "",
     }
 
-    project_id = int(sys.argv[-1])
-    project_dir = project_manager.get_project_by_id(project_id)
+    project_dir = Path(argv[-1])
+    if not project_dir.exists():
+        raise(f"Project directory {project_dir} does not exist")
+
     algorithm_file = project_manager.find_algorithm_file(project_dir)
     message["algorithmType"] = "python" if algorithm_file.name.endswith(".py") else "csharp"
 
@@ -108,7 +111,7 @@ def _compile() -> Dict[str, Any]:
         "mounts": [],
         "volumes": {}
     }
-
+    lean_runner.mount_project_and_library_directories(project_dir, run_options)
     lean_runner.setup_language_specific_run_options(run_options, project_dir, algorithm_file, False, False)
 
     project_config = project_config_manager.get_project_config(project_dir)
@@ -120,11 +123,12 @@ def _compile() -> Dict[str, Any]:
     return message
 
 def _parse_csharp_errors(csharp_output: str, color_coding_required: bool, warning_required: bool) -> list:
+    from re import findall
     errors = []
 
     try:
         relevant_output = csharp_output[csharp_output.index("Build FAILED."):]
-        for match in re.findall(r"(.*)\((\d+),(\d+)\): (error|warning) ([a-zA-Z0-9]+): ([^[]+) ", relevant_output):
+        for match in findall(r"(.*)\((\d+),(\d+)\): (error|warning) ([a-zA-Z0-9]+): ([^[]+) ", relevant_output):
             if color_coding_required:
                 if match[3] == "error":
                     errors.append(f'{bcolors.FAIL}{match[3]} File: {match[0].split("/")[-1]} Line {match[1]} Column {match[2]} - {match[5]}{bcolors.ENDC}\n')
@@ -140,10 +144,11 @@ def _parse_csharp_errors(csharp_output: str, color_coding_required: bool, warnin
     return errors
 
 def _parse_python_errors(python_output: str, color_coding_required: bool) -> list:
+    from re import findall
     errors = []
 
     try:
-        for match in re.findall(r'\*\*\*   File "/LeanCLI/([^"]+)", line (\d+)\n.*\n(.*)\^.*\n(.*)', python_output):
+        for match in findall(r'\*\*\*   File "/LeanCLI/([^"]+)", line (\d+)\n.*\n(.*)\^.*\n(.*)', python_output):
             if color_coding_required:
                 errors.append(f"{bcolors.FAIL}Build Error File: {match[0]} Line {match[1]} Column {match[2]} - {match[3]}{bcolors.ENDC}\n")
             else:
@@ -156,7 +161,7 @@ def _parse_python_errors(python_output: str, color_coding_required: bool) -> lis
                 errors.append(f"Build Error File: {match[1]} Line {match[2]} Column 0 - {match[0]}\n")
     except Exception:
         pass
-    
+
     return errors
 
 

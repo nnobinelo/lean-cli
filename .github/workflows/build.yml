@@ -9,10 +9,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-22.04, ubuntu-20.04, macos-12, macos-11, windows-latest]
-        python-version: ["3.6", "3.7", "3.8", "3.9"]
-        exclude:
-          - os: ubuntu-22.04
-            python-version: '3.6'
+        python-version: ["3.7", "3.8", "3.9", "3.10"]
 
     steps:
       - name: Checkout
@@ -42,9 +39,9 @@ jobs:
         uses: actions/checkout@v2
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
-          python-version: 3.6
+          python-version: '3.8'
 
       - name: Install packaging dependencies
         run: pip install wheel
@@ -60,3 +57,148 @@ jobs:
         with:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
+
+  portable:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-12, windows-latest]
+        python-version: ["3.10"]
+
+    # on a new tag (release), after 'test' and 'release' have ended we will run this
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+    needs: [test, release]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Wait for pip release, sleep in seconds
+        run: sleep 900
+        shell: bash
+
+      - name: Setup Portable
+        run: pip install pyinstaller lean==${GITHUB_REF##*/}
+        shell: bash
+
+      - name: Create Portable Windows & Linux
+        if: matrix.os == 'windows-latest' || matrix.os == 'ubuntu-22.04'
+        run: |
+          mkdir portable
+          cd portable
+          pyinstaller ../scripts/main.spec
+        shell: bash
+
+      - name: Create Portable Macos
+        if: matrix.os == 'macos-12' || matrix.os == 'macos-11'
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PWD: ${{ secrets.MACOS_CERTIFICATE_PWD }}
+          KEYCHAIN_PASSWORD: 'KEYCHAINPASSWORD'
+        run: |
+          echo $MACOS_CERTIFICATE | base64 --decode > certificate.p12
+          security create-keychain -p $KEYCHAIN_PASSWORD build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p $KEYCHAIN_PASSWORD build.keychain
+          security import certificate.p12 -k build.keychain -P $MACOS_CERTIFICATE_PWD -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k $KEYCHAIN_PASSWORD build.keychain
+          security find-identity -v
+          mkdir portable
+          cd portable
+          pyinstaller ../scripts/main.spec
+          cd dist/lean-cli
+          mkdir ./lean
+          /usr/bin/codesign --deep --force --timestamp -o runtime -s CY5GJ9682W ./lean-cli -v
+          find . -iname '*.so' -or -iname '*.dylib'| while read libfile; do /usr/bin/codesign --timestamp --deep -o runtime --force -s CY5GJ9682W "${libfile}"; done;
+        shell: bash
+
+      - name: Get OS Name Without Version
+        run: echo "OS_NAME=$(echo ${{ matrix.os }} | sed 's/-.*//')" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Zip package and notarize Macos
+        if: matrix.os == 'macos-12'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" "QC_APPLE"
+          cd portable/dist/lean-cli
+          ditto -c -k --keepParent . ../lean-latest-${{env.OS_NAME}}.zip
+          cd ..
+          xcrun notarytool submit lean-latest-${{env.OS_NAME}}.zip --keychain-profile "QC_APPLE" --wait
+
+      - name: Zip package Windows
+        if: matrix.os == 'windows-latest'
+        run: |
+          cd portable/dist/lean-cli
+          mkdir ./lean
+          7z a -tzip ../lean-latest-${{env.OS_NAME}}.zip .
+        shell: bash
+
+      - name: Zip package Ubuntu
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          cd portable/dist/lean-cli
+          mkdir ./lean
+          zip -r ../lean-latest-${{env.OS_NAME}}.zip .
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET }}
+          aws-region: us-west-1
+
+      - name: Publish To S3
+        run: |
+          aws s3 cp portable/dist/lean-latest-${{env.OS_NAME}}.zip s3://${{ secrets.AWS_BUCKET }}/ --content-type "application/zip"
+        shell: bash
+
+      # only update version file once.
+      - name: Update version information
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          echo '{ "version": "'${GITHUB_REF##*/}'" }' > portable/latest.json
+          aws s3 cp portable/latest.json s3://${{ secrets.AWS_BUCKET }}/ --content-type "text/plain"
+          aws cloudfront create-invalidation --distribution-id EATCOTHB6KFQP --paths /${{ secrets.AWS_BUCKET }}/latest.json
+        shell: bash
+
+      - name: Cleanup
+        run: |
+          rm -rf portable
+        shell: bash
+
+  invalidate:
+    runs-on: ubuntu-22.04
+    needs: portable
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET }}
+          aws-region: us-west-1
+
+      - name: Invalidate Lean Executable zips
+        run: |
+          aws cloudfront create-invalidation --distribution-id EATCOTHB6KFQP --paths /${{ secrets.AWS_BUCKET }}/lean-latest-ubuntu.zip
+          aws cloudfront create-invalidation --distribution-id EATCOTHB6KFQP --paths /${{ secrets.AWS_BUCKET }}/lean-latest-macos.zip
+          aws cloudfront create-invalidation --distribution-id EATCOTHB6KFQP --paths /${{ secrets.AWS_BUCKET }}/lean-latest-windows.zip
+        shell: bash

@@ -11,16 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import re
-import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, List
-
-from docker.types import Mount
-from pkg_resources import Requirement
-
 from lean.components.cloud.module_manager import ModuleManager
 from lean.components.config.lean_config_manager import LeanConfigManager
 from lean.components.config.output_config_manager import OutputConfigManager
@@ -30,7 +22,8 @@ from lean.components.util.logger import Logger
 from lean.components.util.project_manager import ProjectManager
 from lean.components.util.temp_manager import TempManager
 from lean.components.util.xml_manager import XMLManager
-from lean.constants import MODULES_DIRECTORY, TERMINAL_LINK_PRODUCT_ID
+from lean.constants import MODULES_DIRECTORY, TERMINAL_LINK_PRODUCT_ID, LEAN_ROOT_PATH, DEFAULT_DATA_DIRECTORY_NAME
+from lean.constants import DOCKER_PYTHON_SITE_PACKAGES_PATH
 from lean.models.docker import DockerImage
 from lean.models.utils import DebuggingMethod
 
@@ -128,6 +121,10 @@ class LeanRunner:
                 "mode": "rw"
             }
 
+        # Setup debugging with QC Extension
+        if debugging_method == DebuggingMethod.LocalPlatform:
+            run_options["ports"]["5678"] = "0" # Using port 0 will assign a random port every time
+
         run_options["commands"].append("exec dotnet QuantConnect.Lean.Launcher.dll")
 
         # Copy the project's code to the output directory
@@ -138,12 +135,18 @@ class LeanRunner:
 
         # Format error messages for cleaner output logs
         run_options["format_output"] = self.format_error_before_logging
-        
+
         success = self._docker_manager.run_image(image, **run_options)
 
         cli_root_dir = self._lean_config_manager.get_cli_root_directory()
         relative_project_dir = project_dir.relative_to(cli_root_dir)
         relative_output_dir = output_dir.relative_to(cli_root_dir)
+
+        if debugging_method == DebuggingMethod.LocalPlatform:
+            # set the container port mapped with host in config for later retrieval
+            port = self._docker_manager.get_container_port(run_options["name"], "5678/tcp")
+            output_config = self._output_config_manager.get_output_config(output_dir)
+            output_config.set("debugport", port)
 
         if detach:
             self._temp_manager.delete_temporary_directories_when_done = False
@@ -178,13 +181,17 @@ class LeanRunner:
         :param detach: whether LEAN should run in a detached container
         :return: the Docker configuration containing basic configuration to run Lean
         """
+        from docker.types import Mount
+        from uuid import uuid4
+        from json import dumps
+
         project_dir = algorithm_file.parent
         project_config = self._project_config_manager.get_project_config(project_dir)
         docker_project_config = project_config.get("docker", {})
 
         # Install the required modules when they're needed
         if lean_config.get("data-provider", None) == "QuantConnect.Lean.Engine.DataFeeds.DownloaderDataProvider" \
-            and lean_config.get("data-downloader", None) == "BloombergDataDownloader":
+            and lean_config.get("data-downloader", None) == "TerminalLinkDataDownloader":
             self._module_manager.install_module(TERMINAL_LINK_PRODUCT_ID, lean_config["job-organization-id"])
 
         # Force the use of the LocalDisk map/factor providers if no recent zip present and not using ApiDataProvider
@@ -229,6 +236,9 @@ class LeanRunner:
             "gpu": docker_project_config.get("gpu", False)
         }
 
+        # mount the project and library directories
+        self.mount_project_and_library_directories(project_dir, run_options)
+
         # Mount the data directory
         run_options["volumes"][str(data_dir)] = {
             "bind": "/Lean/Data",
@@ -249,11 +259,16 @@ class LeanRunner:
 
         # Mount all local files referenced in the Lean config
         cli_root_dir = self._lean_config_manager.get_cli_root_directory()
-        for key in ["transaction-log", "bloomberg-symbol-map-file"]:
+        files_to_mount = [
+            ("transaction-log", cli_root_dir),
+            ("terminal-link-symbol-map-file", cli_root_dir / DEFAULT_DATA_DIRECTORY_NAME / "symbol-properties")
+        ]
+        for key, base_path in files_to_mount:
             if key not in lean_config or lean_config[key] == "":
                 continue
 
-            local_path = cli_root_dir / lean_config[key]
+            lean_config_entry = Path(lean_config[key])
+            local_path = lean_config_entry if lean_config_entry.is_absolute() else base_path / lean_config_entry
             if not local_path.exists():
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 local_path.touch()
@@ -266,7 +281,7 @@ class LeanRunner:
             lean_config[key] = f"/Files/{key}"
 
         # Update all hosts that need to point to the host's localhost to host.docker.internal so they resolve properly
-        for key in ["bloomberg-server-host"]:
+        for key in ["terminal-link-server-host"]:
             if key not in lean_config:
                 continue
 
@@ -278,6 +293,7 @@ class LeanRunner:
         # Set up modules
         installed_packages = self._module_manager.get_installed_packages()
         if len(installed_packages) > 0:
+            self._logger.debug(f"LeanRunner.run_lean(): installed packages {len(installed_packages)}")
             self.set_up_common_csharp_options(run_options)
             set_up_common_csharp_options_called = True
 
@@ -298,6 +314,7 @@ class LeanRunner:
 
             # Add all modules to the project, automatically resolving all dependencies
             for package in installed_packages:
+                self._logger.debug(f"LeanRunner.run_lean(): Adding module {package} to the project")
                 run_options["commands"].append(f"rm -rf /root/.nuget/packages/{package.name.lower()}")
                 run_options["commands"].append(
                     f"dotnet add /ModulesProject package {package.name} --version {package.version}")
@@ -313,16 +330,24 @@ class LeanRunner:
         # Save the final Lean config to a temporary file so we can mount it into the container
         config_path = self._temp_manager.create_temporary_directory() / "config.json"
         with config_path.open("w+", encoding="utf-8") as file:
-            file.write(json.dumps(lean_config, indent=4))
+            file.write(dumps(lean_config, indent=4))
 
         # Mount the Lean config
-        run_options["mounts"].append(Mount(target="/Lean/Launcher/bin/Debug/config.json",
+        run_options["mounts"].append(Mount(target=f"{LEAN_ROOT_PATH}/config.json",
                                            source=str(config_path),
                                            type="bind",
                                            read_only=True))
 
         # Assign the container a name and store it in the output directory's configuration
-        run_options["name"] = f"lean_cli_{str(uuid.uuid4()).replace('-', '')}"
+        if "container-name" in lean_config:
+            run_options["name"] = lean_config["container-name"]
+        else:
+            run_options["name"] = f"lean_cli_{str(uuid4()).replace('-', '')}"
+
+        # set the hostname
+        if "hostname" in lean_config:
+            run_options["hostname"] = lean_config["hostname"]
+
         output_config = self._output_config_manager.get_output_config(output_dir)
         output_config.set("container", run_options["name"])
         if "backtest-name" in lean_config:
@@ -342,35 +367,24 @@ class LeanRunner:
         :param run_options: the dictionary to append run options to
         """
 
+        from docker.types import Mount
         # Compile python files
         source_files = self._project_manager.get_source_files(project_dir)
         source_files = [file.relative_to(
             project_dir).as_posix() for file in source_files]
         source_files = [f'"/LeanCLI/{file}"' for file in source_files]
 
+        # Only need to compile files in backtest/live (where the files were mounted in "/LeanCLI") but not research
         run_options["commands"].append(
-            f"python -m compileall {' '.join(source_files)}")
-            
-        # Mount the project directory
-        run_options["volumes"][str(project_dir)] = {
-            "bind": "/LeanCLI",
-            "mode": "rw"
-        }
-
-        # Check if the user has library projects
-        library_dir = self._lean_config_manager.get_cli_root_directory() / "Library"
-        if library_dir.is_dir():
-            # Mount the library projects
-            run_options["volumes"][str(library_dir)] = {
-                "bind": "/Library",
-                "mode": "rw"
-            }
-
-            # Ensure library projects are used when resolving Python imports
-            run_options["commands"].append("mkdir -p $(python -m site --user-site)")
-            run_options["commands"].append("echo /Library > $(python -m site --user-site)/lean-cli.pth")
+            f"""if [ -d '/LeanCLI' ];
+            then
+                python -m compileall {' '.join(source_files)};
+            else
+                echo '/LeanCLI is not mounted, skipping compilation...';
+            fi""")
 
         # Combine the requirements from all library projects and the current project
+        library_dir = self._lean_config_manager.get_cli_root_directory() / "Library"
         requirements_files = list(library_dir.rglob("requirements.txt")) + [project_dir / "requirements.txt"]
         requirements_files = [file for file in requirements_files if file.is_file()]
         requirements = self._concat_python_requirements(requirements_files)
@@ -400,7 +414,7 @@ class LeanRunner:
         # Mount a volume to the user packages directory so we don't install packages every time
         site_packages_volume = self._docker_manager.create_site_packages_volume(requirements_txt)
         run_options["volumes"][site_packages_volume] = {
-            "bind": "/root/.local/lib/python3.6/site-packages",
+            "bind": f"{DOCKER_PYTHON_SITE_PACKAGES_PATH}",
             "mode": "rw"
         }
 
@@ -411,7 +425,7 @@ class LeanRunner:
         # We only need to do this if it hasn't already been done before for this site packages volume
         # To keep track of this we create a special file in the site packages directory after installation
         # If this file already exists we can skip pip install completely
-        marker_file = "/root/.local/lib/python3.6/site-packages/pip-install-done"
+        marker_file = f"{DOCKER_PYTHON_SITE_PACKAGES_PATH}/pip-install-done"
         run_options["commands"].extend([
             f"! test -f {marker_file} && pip install --user --progress-bar off -r /requirements.txt",
             f"touch {marker_file}"
@@ -426,6 +440,7 @@ class LeanRunner:
         :param requirements_files: the paths to the requirements.txt files
         :return: the normalized requirements from all given requirements.txt files
         """
+        from pkg_resources import Requirement
         requirements = []
         for file in requirements_files:
             for line in file.read_text(encoding="utf-8").splitlines():
@@ -446,12 +461,6 @@ class LeanRunner:
         :param release: whether C# projects should be compiled in release configuration instead of debug
         """
         compile_root = self._get_csharp_compile_root(project_dir)
-
-        # Mount the compile root
-        run_options["volumes"][str(compile_root)] = {
-            "bind": "/LeanCLI",
-            "mode": "ro"
-        }
 
         # Ensure all .csproj files refer to the version of LEAN in the Docker container
         csproj_temp_dir = self._temp_manager.create_temporary_directory()
@@ -481,8 +490,9 @@ class LeanRunner:
         # Inherit NoWarn from the user's .csproj
         csproj = self._xml_manager.parse(project_file.read_text(encoding="utf-8"))
         existing_no_warn = csproj.find(".//NoWarn")
+        from re import split
         if existing_no_warn is not None:
-            codes = [c for c in re.split(r"[^a-zA-Z0-9]", existing_no_warn.text) if c != ""]
+            codes = [c for c in split(r"[^a-zA-Z0-9]", existing_no_warn.text) if c != ""]
             msbuild_properties["NoWarn"] += codes
 
         # Turn the NoWarn property into a string
@@ -497,7 +507,7 @@ class LeanRunner:
         # Copy over the algorithm DLL
         # Copy over the project reference DLLs'
         # Copy over all output DLLs that don't already exist in /Lean/Launcher/bin/Debug
-        run_options["commands"].append("cp -R -n /Compile/bin/. /Lean/Launcher/bin/Debug/")
+        run_options["commands"].append(f"cp -R -n /Compile/bin/. {LEAN_ROOT_PATH}/")
 
         # Copy over all library DLLs that don't already exist in /Lean/Launcher/bin/Debug
         # CopyLocalLockFileAssemblies does not copy the OS-specific DLLs to the output directory
@@ -512,6 +522,7 @@ class LeanRunner:
 
         :param run_options: the dictionary to append run options to
         """
+        from docker.types import Mount
         # Mount a volume to NuGet's cache directory so we only download packages once
         self._docker_manager.create_volume("lean_cli_nuget")
         run_options["volumes"]["lean_cli_nuget"] = {
@@ -641,6 +652,7 @@ for library_id, library_data in project_assets["targets"][project_target].items(
         :param temp_dir: the temporary directory in which temporary .csproj files should be placed
         :param run_options: the dictionary to append run options to
         """
+        from docker.types import Mount
         csproj = self._xml_manager.parse(csproj_path.read_text(encoding="utf-8"))
         include_added = False
 
@@ -654,7 +666,7 @@ for library_id, library_data in project_assets["targets"][project_target].items(
             package_reference.clear()
 
             package_reference.tag = "Reference"
-            package_reference.set("Include", "/Lean/Launcher/bin/Debug/*.dll")
+            package_reference.set("Include", f"{LEAN_ROOT_PATH}/*.dll")
             package_reference.append(self._xml_manager.parse("<Private>False</Private>"))
 
             include_added = True
@@ -686,6 +698,9 @@ for library_id, library_data in project_assets["targets"][project_target].items(
         :param disk_provider: the fully classified name of the disk provider for this property
         :param zip_dir: the directory where the zip provider looks for zip files
         """
+        from re import sub
+        from datetime import datetime
+
         if lean_config.get(config_key, None) != zip_provider:
             return
 
@@ -694,7 +709,7 @@ for library_id, library_data in project_assets["targets"][project_target].items(
             return
 
         zip_names = sorted([f.name for f in zip_dir.iterdir() if f.name.endswith(".zip")], reverse=True)
-        zip_names = [re.sub(r"[^\d]", "", name) for name in zip_names]
+        zip_names = [sub(r"[^\d]", "", name) for name in zip_names]
 
         if len(zip_names) == 0 or (datetime.now() - datetime.strptime(zip_names[0], "%Y%m%d")).days > 7:
             lean_config[config_key] = disk_provider
@@ -711,17 +726,34 @@ for library_id, library_data in project_assets["targets"][project_target].items(
 
     def format_error_before_logging(self, chunk: str):
         from lean.components.util import compiler
+        from json import loads
         errors = []
 
         # As we don't have algorithm type information. We can check errors for both
         # Python
         jsonString = compiler.get_errors("python", chunk)
-        jsonData = json.loads(jsonString)
+        jsonData = loads(jsonString)
         errors.extend(jsonData["aErrors"])
         # CSharp
         jsonString = compiler.get_errors("csharp", chunk)
-        jsonData = json.loads(jsonString)
+        jsonData = loads(jsonString)
         errors.extend(jsonData["aErrors"])
 
         for error in errors:
             self._logger.info(error)
+
+    def mount_project_and_library_directories(self, project_dir: Path, run_options: Dict[str, Any]) -> None:
+        # Mount the project directory
+        run_options["volumes"][str(project_dir)] = {
+            "bind": "/LeanCLI",
+            "mode": "rw"
+        }
+
+        # Check if the user has library projects and mount the Library directory
+        library_dir = self._lean_config_manager.get_cli_root_directory() / "Library"
+        if library_dir.is_dir():
+            # Mount the library projects
+            run_options["volumes"][str(library_dir)] = {
+                "bind": "/Library",
+                "mode": "rw"
+            }

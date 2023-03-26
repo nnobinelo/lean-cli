@@ -13,15 +13,15 @@
 
 from typing import Optional
 
-import click
+from click import command, option
 
 from lean.click import LeanCommand
 from lean.container import container
 
 
-@click.command(cls=LeanCommand)
-@click.option("--project", type=str, help="Name or id of the project to pull (all cloud projects if not specified)")
-@click.option("--pull-bootcamp", is_flag=True, default=False, help="Pull Boot Camp projects (disabled by default)")
+@command(cls=LeanCommand)
+@option("--project", type=str, help="Name or id of the project to pull (all cloud projects if not specified)")
+@option("--pull-bootcamp", is_flag=True, default=False, help="Pull Boot Camp projects (disabled by default)")
 def pull(project: Optional[str], pull_bootcamp: bool) -> None:
     """Pull projects from QuantConnect to the local drive.
 
@@ -29,18 +29,31 @@ def pull(project: Optional[str], pull_bootcamp: bool) -> None:
 
     This command will not delete local files for which there is no counterpart in the cloud.
     """
-    api_client = container.api_client()
-    all_projects = api_client.projects.get_all()
-
     # Parse which projects need to be pulled
+    project_id = None
+    project_name = None
     if project is not None:
-        projects_to_pull = [p for p in all_projects if str(p.projectId) == project or p.name == project]
-        if len(projects_to_pull) == 0:
-            raise RuntimeError("No project with the given name or id exists in the cloud")
-    else:
-        projects_to_pull = all_projects
-        if not pull_bootcamp:
-            projects_to_pull = [p for p in projects_to_pull if not p.name.startswith("Boot Camp/")]
+        try:
+            project_id = int(project)
+        except ValueError:
+            # We treat it as a name rather than an id
+            project_name = project
 
-    pull_manager = container.pull_manager()
-    pull_manager.pull_projects(projects_to_pull)
+    api_client = container.api_client
+    projects_to_pull = []
+    all_projects = None
+
+    organization_id = container.organization_manager.try_get_working_organization_id()
+
+    if project_id is not None:
+        projects_to_pull.append(api_client.projects.get(project_id, organization_id))
+    else:
+        all_projects = api_client.projects.get_all(organization_id)
+        project_manager = container.project_manager
+        projects_to_pull = project_manager.get_projects_by_name_or_id(all_projects, project_name)
+
+    if project is None and not pull_bootcamp:
+        projects_to_pull = [p for p in projects_to_pull if not p.name.startswith("Boot Camp/")]
+
+    pull_manager = container.pull_manager
+    pull_manager.pull_projects(projects_to_pull, all_projects)

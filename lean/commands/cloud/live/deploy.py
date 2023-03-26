@@ -11,25 +11,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import webbrowser
-from typing import Dict, List, Tuple, Optional
-import click
+from typing import Any, Dict, List, Tuple, Optional
+from click import prompt, option, argument, Choice, confirm
 from lean.click import LeanCommand, ensure_options
 from lean.components.api.api_client import APIClient
 from lean.components.util.logger import Logger
 from lean.container import container
 from lean.models.api import (QCEmailNotificationMethod, QCNode, QCNotificationMethod, QCSMSNotificationMethod,
-                             QCWebhookNotificationMethod, QCProject)
+                             QCWebhookNotificationMethod, QCTelegramNotificationMethod, QCProject)
+from lean.models.json_module import LiveInitialStateInput
 from lean.models.logger import Option
 from lean.models.brokerages.cloud.cloud_brokerage import CloudBrokerage
-from lean.models.configuration import Configuration, InfoConfiguration, InternalInputUserInput, OrganzationIdConfiguration
+from lean.models.configuration import InternalInputUserInput
 from lean.models.click_options import options_from_json
 from lean.models.brokerages.cloud import all_cloud_brokerages
 from lean.commands.cloud.live.live import live
+from lean.components.util.live_utils import _get_configs_for_options, get_last_portfolio_cash_holdings, configure_initial_cash_balance, configure_initial_holdings,\
+                                            _configure_initial_cash_interactively, _configure_initial_holdings_interactively
 
 def _log_notification_methods(methods: List[QCNotificationMethod]) -> None:
     """Logs a list of notification methods."""
-    logger = container.logger()
+    logger = container.logger
 
     email_methods = [method for method in methods if isinstance(method, QCEmailNotificationMethod)]
     email_methods = "None" if len(email_methods) == 0 else ", ".join(method.address for method in email_methods)
@@ -40,9 +42,13 @@ def _log_notification_methods(methods: List[QCNotificationMethod]) -> None:
     sms_methods = [method for method in methods if isinstance(method, QCSMSNotificationMethod)]
     sms_methods = "None" if len(sms_methods) == 0 else ", ".join(method.phoneNumber for method in sms_methods)
 
+    telegram_methods = [method for method in methods if isinstance(method, QCTelegramNotificationMethod)]
+    telegram_methods = "None" if len(telegram_methods) == 0 else ", ".join(f"{{{method.id}, {method.token}}}" for method in telegram_methods)
+
     logger.info(f"Email notifications: {email_methods}")
     logger.info(f"Webhook notifications: {webhook_methods}")
     logger.info(f"SMS notifications: {sms_methods}")
+    logger.info(f"Telegram notifications: {telegram_methods}")
 
 
 def _prompt_notification_method() -> QCNotificationMethod:
@@ -50,44 +56,60 @@ def _prompt_notification_method() -> QCNotificationMethod:
 
     :return: the notification method configured by the user
     """
-    logger = container.logger()
+    logger = container.logger
     selected_method = logger.prompt_list("Select a notification method", [Option(id="email", label="Email"),
                                                                           Option(id="webhook", label="Webhook"),
-                                                                          Option(id="sms", label="SMS")])
+                                                                          Option(id="sms", label="SMS"),
+                                                                          Option(id="telegram", label="Telegram")])
 
     if selected_method == "email":
-        address = click.prompt("Email address")
-        subject = click.prompt("Subject")
+        address = prompt("Email address")
+        subject = prompt("Subject")
         return QCEmailNotificationMethod(address=address, subject=subject)
     elif selected_method == "webhook":
-        address = click.prompt("URL")
+        address = prompt("URL")
         headers = {}
 
         while True:
             headers_str = "None" if headers == {} else ", ".join(f"{key}={headers[key]}" for key in headers)
             logger.info(f"Headers: {headers_str}")
 
-            if not click.confirm("Do you want to add a header?", default=False):
+            if not confirm("Do you want to add a header?", default=False):
                 break
 
-            key = click.prompt("Header key")
-            value = click.prompt("Header value")
+            key = prompt("Header key")
+            value = prompt("Header value")
             headers[key] = value
 
         return QCWebhookNotificationMethod(address=address, headers=headers)
+    elif selected_method == "telegram":
+        chat_id = prompt("User Id/Group Id")
+
+        custom_bot = confirm("Is a custom bot being used?", default=False)
+        if custom_bot:
+            token = prompt("Token (optional)")
+        else:
+            token = None
+
+        return QCTelegramNotificationMethod(id=chat_id, token=token)
     else:
-        phone_number = click.prompt("Phone number")
+        phone_number = prompt("Phone number")
         return QCSMSNotificationMethod(phoneNumber=phone_number)
 
 
-def _configure_brokerage(logger: Logger) -> CloudBrokerage:
+def _configure_brokerage(logger: Logger, user_provided_options: Dict[str, Any], show_secrets: bool) -> CloudBrokerage:
     """Interactively configures the brokerage to use.
 
     :param logger: the logger to use
+    :param user_provided_options: the dictionary containing user provided options
+    :param show_secrets: whether to show secrets on input
     :return: the cloud brokerage the user configured
     """
     brokerage_options = [Option(id=b, label=b.get_name()) for b in all_cloud_brokerages]
-    return logger.prompt_list("Select a brokerage", brokerage_options).build(None,logger)
+    return logger.prompt_list("Select a brokerage", brokerage_options).build(None,
+                                                                             logger,
+                                                                             user_provided_options,
+                                                                             hide_input=not show_secrets)
 
 
 def _configure_live_node(logger: Logger, api_client: APIClient, cloud_project: QCProject) -> QCNode:
@@ -117,9 +139,9 @@ def _configure_notifications(logger: Logger) -> Tuple[bool, bool, List[QCNotific
     """
     logger.info(
         "You can optionally request for your strategy to send notifications when it generates an order or emits an insight")
-    logger.info("You can use any combination of email notifications, webhook notifications and SMS notifications")
-    notify_order_events = click.confirm("Do you want to send notifications on order events?", default=False)
-    notify_insights = click.confirm("Do you want to send notifications on insights?", default=False)
+    logger.info("You can use any combination of email notifications, webhook notifications, SMS notifications, and telegram notifications")
+    notify_order_events = confirm("Do you want to send notifications on order events?", default=False)
+    notify_insights = confirm("Do you want to send notifications on insights?", default=False)
     notify_methods = []
 
     if notify_order_events or notify_insights:
@@ -128,7 +150,7 @@ def _configure_notifications(logger: Logger) -> Tuple[bool, bool, List[QCNotific
 
         while True:
             _log_notification_methods(notify_methods)
-            if not click.confirm("Do you want to add another notification method?", default=False):
+            if not confirm("Do you want to add another notification method?", default=False):
                 break
             notify_methods.append(_prompt_notification_method())
 
@@ -143,55 +165,60 @@ def _configure_auto_restart(logger: Logger) -> bool:
     """
     logger.info("Automatic restarting uses best efforts to restart the algorithm if it fails due to a runtime error")
     logger.info("This can help improve its resilience to temporary errors such as a brokerage API disconnection")
-    return click.confirm("Do you want to enable automatic algorithm restarting?", default=True)
+    return confirm("Do you want to enable automatic algorithm restarting?", default=True)
 
-#TODO: same duplication present in commands\live.py
-def _get_configs_for_options() -> Dict[Configuration, str]: 
-    run_options: Dict[str, Configuration] = {}
-    for module in all_cloud_brokerages:
-        for config in module.get_all_input_configs([InternalInputUserInput, InfoConfiguration]):
-            if config._id in run_options:
-                raise ValueError(f'Options names should be unique. Duplicate key present: {config._id}')
-            run_options[config._id] = config
-    return list(run_options.values())
 
 @live.command(cls=LeanCommand, default_command=True, name="deploy")
-@click.argument("project", type=str)
-@click.option("--brokerage",
-              type=click.Choice([b.get_name() for b in all_cloud_brokerages], case_sensitive=False),
+@argument("project", type=str)
+@option("--brokerage",
+              type=Choice([b.get_name() for b in all_cloud_brokerages], case_sensitive=False),
               help="The brokerage to use")
-@options_from_json(_get_configs_for_options())
-@click.option("--node", type=str, help="The name or id of the live node to run on")
-@click.option("--auto-restart", type=bool, help="Whether automatic algorithm restarting must be enabled")
-@click.option("--notify-order-events", type=bool, help="Whether notifications must be sent for order events")
-@click.option("--notify-insights", type=bool, help="Whether notifications must be sent for emitted insights")
-@click.option("--notify-emails",
+@options_from_json(_get_configs_for_options("cloud"))
+@option("--node", type=str, help="The name or id of the live node to run on")
+@option("--auto-restart", type=bool, help="Whether automatic algorithm restarting must be enabled")
+@option("--notify-order-events", type=bool, help="Whether notifications must be sent for order events")
+@option("--notify-insights", type=bool, help="Whether notifications must be sent for emitted insights")
+@option("--notify-emails",
               type=str,
               help="A comma-separated list of 'email:subject' pairs configuring email-notifications")
-@click.option("--notify-webhooks",
+@option("--notify-webhooks",
               type=str,
               help="A comma-separated list of 'url:HEADER_1=VALUE_1:HEADER_2=VALUE_2:etc' pairs configuring webhook-notifications")
-@click.option("--notify-sms", type=str, help="A comma-separated list of phone numbers configuring SMS-notifications")
-@click.option("--push",
+@option("--notify-sms", type=str, help="A comma-separated list of phone numbers configuring SMS-notifications")
+@option("--notify-telegram", type=str, help="A comma-separated list of 'user/group Id:token(optional)' pairs configuring telegram-notifications")
+@option("--live-cash-balance",
+              type=str,
+              default="",
+              help=f"A comma-separated list of currency:amount pairs of initial cash balance")
+@option("--live-holdings",
+              type=str,
+              default="",
+              help=f"A comma-separated list of symbol:symbolId:quantity:averagePrice of initial portfolio holdings")
+@option("--push",
               is_flag=True,
               default=False,
               help="Push local modifications to the cloud before starting live trading")
-@click.option("--open", "open_browser",
+@option("--open", "open_browser",
               is_flag=True,
               default=False,
               help="Automatically open the live results in the browser once the deployment starts")
+@option("--show-secrets", is_flag=True, show_default=True, default=False, help="Show secrets as they are input")
 def deploy(project: str,
-         brokerage: str,
-         node: str,
-         auto_restart: bool,
-         notify_order_events: Optional[bool],
-         notify_insights: Optional[bool],
-         notify_emails: Optional[str],
-         notify_webhooks: Optional[str],
-         notify_sms: Optional[str],
-         push: bool,
-         open_browser: bool,
-         **kwargs) -> None:
+           brokerage: str,
+           node: str,
+           auto_restart: bool,
+           notify_order_events: Optional[bool],
+           notify_insights: Optional[bool],
+           notify_emails: Optional[str],
+           notify_webhooks: Optional[str],
+           notify_sms: Optional[str],
+           notify_telegram: Optional[str],
+           live_cash_balance: Optional[str],
+           live_holdings: Optional[str],
+           push: bool,
+           open_browser: bool,
+           show_secrets: bool,
+           **kwargs) -> None:
     """Start live trading for a project in the cloud.
 
     PROJECT must be the name or the id of the project to start live trading for.
@@ -202,13 +229,13 @@ def deploy(project: str,
     In non-interactive mode the options specific to the given brokerage are required,
     as well as --node, --auto-restart, --notify-order-events and --notify-insights.
     """
-    logger = container.logger()
-    api_client = container.api_client()
+    logger = container.logger
+    api_client = container.api_client
 
-    cloud_project_manager = container.cloud_project_manager()
+    cloud_project_manager = container.cloud_project_manager
     cloud_project = cloud_project_manager.get_cloud_project(project, push)
 
-    cloud_runner = container.cloud_runner()
+    cloud_runner = container.cloud_runner
     finished_compile = cloud_runner.compile_project(cloud_project)
 
     if brokerage is not None:
@@ -218,14 +245,14 @@ def deploy(project: str,
         [brokerage_instance] = [cloud_brokerage for cloud_brokerage in all_cloud_brokerages if cloud_brokerage.get_name() == brokerage]
         # update essential properties from brokerage to datafeed
         # needs to be updated before fetching required properties
-        essential_properties = [brokerage_instance._convert_lean_key_to_variable(prop) for prop in brokerage_instance.get_essential_properties()]
+        essential_properties = [brokerage_instance.convert_lean_key_to_variable(prop) for prop in brokerage_instance.get_essential_properties()]
         ensure_options(essential_properties)
-        essential_properties_value = {brokerage_instance._convert_variable_to_lean_key(prop) : kwargs[prop] for prop in essential_properties}
+        essential_properties_value = {brokerage_instance.convert_variable_to_lean_key(prop) : kwargs[prop] for prop in essential_properties}
         brokerage_instance.update_configs(essential_properties_value)
         # now required properties can be fetched as per data provider from esssential properties
-        required_properties = [brokerage_instance._convert_lean_key_to_variable(prop) for prop in brokerage_instance.get_required_properties([OrganzationIdConfiguration, InternalInputUserInput])]
+        required_properties = [brokerage_instance.convert_lean_key_to_variable(prop) for prop in brokerage_instance.get_required_properties([InternalInputUserInput])]
         ensure_options(required_properties)
-        required_properties_value = {brokerage_instance._convert_variable_to_lean_key(prop) : kwargs[prop] for prop in required_properties}
+        required_properties_value = {brokerage_instance.convert_variable_to_lean_key(prop) : kwargs[prop] for prop in required_properties}
         brokerage_instance.update_configs(required_properties_value)
 
         all_nodes = api_client.nodes.get_all(cloud_project.organizationId)
@@ -253,11 +280,39 @@ def deploy(project: str,
         if notify_sms is not None:
             for phoneNumber in notify_sms.split(","):
                 notify_methods.append(QCSMSNotificationMethod(phoneNumber=phoneNumber))
+
+        if notify_telegram is not None:
+            for config in notify_telegram.split(","):
+                id_token_pair = config.split(":", 1)    # telegram token is like "01234567:Abc132xxx..."
+                if len(id_token_pair) == 2:
+                    chat_id, token = id_token_pair
+                    token = None if not token else token
+                    notify_methods.append(QCTelegramNotificationMethod(id=chat_id, token=token))
+                else:
+                    notify_methods.append(QCTelegramNotificationMethod(id=id_token_pair[0]))
+
+        cash_balance_option, holdings_option, last_cash, last_holdings = get_last_portfolio_cash_holdings(api_client, brokerage_instance, cloud_project.projectId, project)
+
+        if cash_balance_option != LiveInitialStateInput.NotSupported:
+            live_cash_balance = configure_initial_cash_balance(logger, cash_balance_option, live_cash_balance, last_cash)
+        elif live_cash_balance is not None and live_cash_balance != "":
+            raise RuntimeError(f"Custom cash balance setting is not available for {brokerage_instance.get_name()}")
+
+        if holdings_option != LiveInitialStateInput.NotSupported:
+            live_holdings = configure_initial_holdings(logger, holdings_option, live_holdings, last_holdings)
+        elif live_holdings is not None and live_holdings != "":
+            raise RuntimeError(f"Custom portfolio holdings setting is not available for {brokerage_instance.get_name()}")
+
     else:
-        brokerage_instance = _configure_brokerage(logger)
+        brokerage_instance = _configure_brokerage(logger, kwargs, show_secrets=show_secrets)
         live_node = _configure_live_node(logger, api_client, cloud_project)
         notify_order_events, notify_insights, notify_methods = _configure_notifications(logger)
         auto_restart = _configure_auto_restart(logger)
+        cash_balance_option, holdings_option, last_cash, last_holdings = get_last_portfolio_cash_holdings(api_client, brokerage_instance, cloud_project.projectId, project)
+        if cash_balance_option != LiveInitialStateInput.NotSupported:
+            live_cash_balance = _configure_initial_cash_interactively(logger, cash_balance_option, last_cash)
+        if holdings_option != LiveInitialStateInput.NotSupported:
+            live_holdings = _configure_initial_holdings_interactively(logger, holdings_option, last_holdings)
 
     brokerage_settings = brokerage_instance.get_settings()
     price_data_handler = brokerage_instance.get_price_data_handler()
@@ -273,10 +328,14 @@ def deploy(project: str,
     logger.info(f"Insight notifications: {'Yes' if notify_insights else 'No'}")
     if notify_order_events or notify_insights:
         _log_notification_methods(notify_methods)
+    if live_cash_balance:
+        logger.info(f"Initial live cash balance: {live_cash_balance}")
+    if live_holdings:
+        logger.info(f"Initial live portfolio holdings: {live_holdings}")
     logger.info(f"Automatic algorithm restarting: {'Yes' if auto_restart else 'No'}")
 
     if brokerage is None:
-        click.confirm(f"Are you sure you want to start live trading for project '{cloud_project.name}'?",
+        confirm(f"Are you sure you want to start live trading for project '{cloud_project.name}'?",
                       default=False,
                       abort=True)
 
@@ -289,9 +348,12 @@ def deploy(project: str,
                                            cloud_project.leanVersionId,
                                            notify_order_events,
                                            notify_insights,
-                                           notify_methods)
+                                           notify_methods,
+                                           live_cash_balance,
+                                           live_holdings)
 
     logger.info(f"Live url: {live_algorithm.get_url()}")
 
     if open_browser:
-        webbrowser.open(live_algorithm.get_url())
+        from webbrowser import open
+        open(live_algorithm.get_url())

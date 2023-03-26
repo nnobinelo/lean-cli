@@ -16,20 +16,26 @@ from unittest import mock
 
 import pytest
 from click.testing import CliRunner
-from dependency_injector import providers
 
 from lean.commands import lean
 from lean.container import container
 from lean.models.docker import DockerImage
+from lean.constants import CUSTOM_FOUNDATION, CUSTOM_RESEARCH, CUSTOM_ENGINE
+from tests.conftest import initialize_container
+from tests.test_helpers import create_fake_lean_cli_directory
 
-CUSTOM_FOUNDATION_IMAGE = DockerImage(name="lean-cli/foundation", tag="latest")
-CUSTOM_ENGINE_IMAGE = DockerImage(name="lean-cli/engine", tag="latest")
-CUSTOM_RESEARCH_IMAGE = DockerImage(name="lean-cli/research", tag="latest")
+CUSTOM_FOUNDATION_IMAGE = DockerImage(name=CUSTOM_FOUNDATION, tag="latest")
+CUSTOM_ENGINE_IMAGE = DockerImage(name=CUSTOM_ENGINE, tag="latest")
+CUSTOM_RESEARCH_IMAGE = DockerImage(name=CUSTOM_RESEARCH, tag="latest")
+
+
+@pytest.fixture(autouse=True)
+def create_fake_cli_directory() -> None:
+    create_fake_lean_cli_directory()
 
 
 def create_fake_repositories() -> None:
     lean_dir = Path.cwd() / "Lean"
-    alpha_streams_dir = Path.cwd() / "AlphaStreams"
 
     for name in ["DockerfileLeanFoundation", "DockerfileLeanFoundationARM", "Dockerfile", "DockerfileJupyter"]:
         path = lean_dir / name
@@ -40,8 +46,6 @@ FROM ubuntu
 RUN true
             """.strip())
 
-    alpha_streams_dir.mkdir()
-
 
 dockerfiles_seen = []
 
@@ -50,17 +54,17 @@ def build_image(root: Path, dockerfile: Path, target_image: DockerImage) -> None
     dockerfiles_seen.append(dockerfile.read_text(encoding="utf-8").strip())
 
 
-def test_build_compiles_lean_and_alpha_streams_sdk() -> None:
+def test_build_compiles_lean() -> None:
     create_fake_repositories()
 
     docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    container.docker_manager = docker_manager
 
     result = CliRunner().invoke(lean, ["build", "."])
 
     assert result.exit_code == 0
 
-    assert docker_manager.run_image.call_count == 2
+    assert docker_manager.run_image.call_count == 1
 
 
 @mock.patch("platform.machine")
@@ -73,7 +77,7 @@ def test_build_builds_foundation_image(machine: mock.Mock, architecture: str, fi
     machine.return_value = architecture
 
     docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    initialize_container(docker_manager)
 
     result = CliRunner().invoke(lean, ["build", "."])
 
@@ -93,7 +97,7 @@ def test_build_builds_engine_image_based_on_custom_foundation_image() -> None:
 
     docker_manager = mock.Mock()
     docker_manager.build_image.side_effect = build_image
-    container.docker_manager.override(providers.Object(docker_manager))
+    container.docker_manager = docker_manager
 
     result = CliRunner().invoke(lean, ["build", "."])
 
@@ -113,7 +117,7 @@ def test_build_builds_research_image_based_on_custom_engine_image() -> None:
 
     docker_manager = mock.Mock()
     docker_manager.build_image.side_effect = build_image
-    container.docker_manager.override(providers.Object(docker_manager))
+    container.docker_manager = docker_manager
 
     result = CliRunner().invoke(lean, ["build", "."])
 
@@ -132,7 +136,7 @@ def test_build_uses_current_directory_as_root_directory_when_root_not_given() ->
     create_fake_repositories()
 
     docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    container.docker_manager = docker_manager
 
     result = CliRunner().invoke(lean, ["build"])
 
@@ -143,7 +147,7 @@ def test_build_uses_current_directory_as_root_directory_when_root_not_given() ->
 
 def test_build_aborts_when_invalid_root_directory_passed() -> None:
     docker_manager = mock.Mock()
-    container.docker_manager.override(providers.Object(docker_manager))
+    container.docker_manager = docker_manager
 
     result = CliRunner().invoke(lean, ["build", "."])
 
@@ -160,8 +164,8 @@ def test_build_uses_custom_tag_when_given(machine: mock.Mock, architecture: str,
     machine.return_value = architecture
 
     docker_manager = mock.Mock()
+    initialize_container(docker_manager)
     docker_manager.build_image.side_effect = build_image
-    container.docker_manager.override(providers.Object(docker_manager))
 
     result = CliRunner().invoke(lean, ["build", ".", "--tag", "my-tag"])
 

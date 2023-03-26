@@ -11,15 +11,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import re
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
 from pydantic import validator
-from rich import box
-from rich.table import Table
-from rich.text import Text
 
 from lean.constants import EQUITY_SECURITY_MASTER_PRODUCT_ID, BULK_EQUITY_SECURITY_MASTER_PRODUCT_ID
 from lean.models.pydantic import WrappedBaseModel
@@ -48,31 +44,27 @@ class QCParameter(WrappedBaseModel):
     type: Optional[str]
 
 
-class QCLiveResults(WrappedBaseModel):
-    eStatus: str
-    sDeployID: Optional[str] = None
-    sServerType: Optional[str] = None
-    dtLaunched: Optional[datetime] = None
-    dtStopped: Optional[datetime] = None
-    sBrokerage: Optional[str] = None
-    sSecurityTypes: Optional[str] = None
-    dUnrealized: Optional[float] = None
-    dfees: Optional[float] = None
-    dnetprofit: Optional[float] = None
-    dEquity: Optional[float] = None
-    dHoldings: Optional[float] = None
-    dCapital: Optional[float] = None
-    dVolume: Optional[float] = None
-    iTrades: Optional[int] = None
-    sErrorMessage: Optional[str] = None
-
-
 class QCLanguage(str, Enum):
     CSharp = "C#"
     FSharp = "F#"
     VisualBasic = "VB"
     Java = "Ja"
     Python = "Py"
+
+
+class QCProjectLibrary(WrappedBaseModel):
+    projectId: int
+    libraryName: str
+    ownerName: str
+    access: bool
+
+    def __hash__(self):
+        return hash(self.projectId)
+
+    def __eq__(self, other: Any):
+        if not isinstance(other, type(self)):
+            return NotImplemented
+        return self.projectId == other.projectId
 
 
 class QCProject(WrappedBaseModel):
@@ -86,9 +78,9 @@ class QCProject(WrappedBaseModel):
     collaborators: List[QCCollaborator]
     leanVersionId: int
     leanPinnedToMaster: bool
+    leanEnvironment: int
     parameters: List[QCParameter]
-    liveResults: QCLiveResults
-    libraries: List[int]
+    libraries: List[QCProjectLibrary]
 
     @validator("parameters", pre=True)
     def process_parameters_dict(cls, value: Any) -> Any:
@@ -102,6 +94,14 @@ class QCProject(WrappedBaseModel):
         :return: a url which when visited opens an Algorithm Lab tab containing the project
         """
         return f"https://www.quantconnect.com/project/{self.projectId}"
+
+    def __hash__(self):
+        return hash(self.projectId)
+
+    def __eq__(self, other: Any):
+        if not isinstance(other, type(self)):
+            return NotImplemented
+        return self.projectId == other.projectId
 
 
 class QCCreatedProject(WrappedBaseModel):
@@ -190,11 +190,15 @@ class QCBacktest(WrappedBaseModel):
         """
         return f"https://www.quantconnect.com/project/{self.projectId}/{self.backtestId}"
 
-    def get_statistics_table(self) -> Table:
+    def get_statistics_table(self):
         """Converts the statistics into a pretty table.
 
         :return: a table containing all statistics
         """
+        from rich import box
+        from rich.table import Table
+        from rich.text import Text
+
         stats = []
 
         for key, value in self.runtimeStatistics.items():
@@ -320,7 +324,12 @@ class QCSMSNotificationMethod(WrappedBaseModel):
     phoneNumber: str
 
 
-QCNotificationMethod = Union[QCEmailNotificationMethod, QCWebhookNotificationMethod, QCSMSNotificationMethod]
+class QCTelegramNotificationMethod(WrappedBaseModel):
+    id: str
+    token: Optional[str] = None
+
+
+QCNotificationMethod = Union[QCEmailNotificationMethod, QCWebhookNotificationMethod, QCSMSNotificationMethod, QCTelegramNotificationMethod]
 
 
 class QCCard(WrappedBaseModel):
@@ -503,8 +512,9 @@ class QCDataVendor(WrappedBaseModel):
 
     @validator("regex", pre=True)
     def parse_regex(cls, value: Any) -> Any:
+        from re import compile
         if isinstance(value, str):
-            return re.compile(value[value.index("/") + 1:value.rindex("/")])
+            return compile(value[value.index("/") + 1:value.rindex("/")])
         return value
 
 
@@ -550,3 +560,11 @@ class QCTerminalNewsItem(WrappedBaseModel):
     week_deleted: Optional[Any]
     created: datetime
     date: datetime
+
+
+class QCLeanEnvironment(WrappedBaseModel):
+    id: int
+    name: str
+    path: Optional[str]
+    description: str
+    public: bool

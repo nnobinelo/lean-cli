@@ -11,10 +11,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import os
+from os import environ
 from pathlib import Path
 
 # Due to the way the filesystem is mocked in unit tests, values should not be Path instances.
+
+# Custom images names
+CUSTOM_FOUNDATION = "lean-cli/foundation"
+CUSTOM_ENGINE = "lean-cli/engine"
+CUSTOM_RESEARCH = "lean-cli/research"
+
+# The python version of docker image
+LEAN_PYTHON_VERSION = "3.8"
+
+# The strict python version of docker image
+LEAN_STRICT_PYTHON_VERSION =  f"{LEAN_PYTHON_VERSION}.13"
+
+# The path to the root python directory in docker image
+DOCKER_PYTHON_SITE_PACKAGES_PATH = f"/root/.local/lib/python{LEAN_PYTHON_VERSION}/site-packages"
+
+# The file in which general CLI configuration is stored
+LEAN_ROOT_PATH = "/Lean/Launcher/bin/Debug"
 
 # The file in which general CLI configuration is stored
 GENERAL_CONFIG_PATH = str(Path("~/.lean/config").expanduser())
@@ -57,7 +74,7 @@ SITE_PACKAGES_VOLUME_LIMIT = 10
 
 # The base url of the QuantConnect API
 # This url should end with a forward slash
-_qc_api = os.environ.get("QC_API", "")
+_qc_api = environ.get("QC_API", "")
 if _qc_api == "local":
     API_BASE_URL = "http://localhost:5612/api/v2/"
 elif _qc_api == "beta":

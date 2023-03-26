@@ -14,7 +14,6 @@
 from unittest import mock
 
 from click.testing import CliRunner
-from dependency_injector import providers
 
 from lean.commands import lean
 from lean.container import container
@@ -32,16 +31,16 @@ def test_cloud_pull_pulls_all_non_bootcamp_projects_when_no_options_given() -> N
 
     api_client = mock.Mock()
     api_client.projects.get_all.return_value = cloud_projects
-    container.api_client.override(providers.Object(api_client))
+    container.api_client = api_client
 
     pull_manager = mock.Mock()
-    container.pull_manager.override(providers.Object(pull_manager))
+    container.pull_manager = pull_manager
 
     result = CliRunner().invoke(lean, ["cloud", "pull"])
 
     assert result.exit_code == 0
 
-    pull_manager.pull_projects.assert_called_once_with(cloud_projects[:3])
+    pull_manager.pull_projects.assert_called_once_with(cloud_projects[:3], cloud_projects)
 
 
 def test_cloud_pull_pulls_all_projects_when_pull_bootcamp_option_given() -> None:
@@ -55,16 +54,16 @@ def test_cloud_pull_pulls_all_projects_when_pull_bootcamp_option_given() -> None
 
     api_client = mock.Mock()
     api_client.projects.get_all.return_value = cloud_projects
-    container.api_client.override(providers.Object(api_client))
+    container.api_client = api_client
 
     pull_manager = mock.Mock()
-    container.pull_manager.override(providers.Object(pull_manager))
+    container.pull_manager = pull_manager
 
     result = CliRunner().invoke(lean, ["cloud", "pull", "--pull-bootcamp"])
 
     assert result.exit_code == 0
 
-    pull_manager.pull_projects.assert_called_once_with(cloud_projects)
+    pull_manager.pull_projects.assert_called_once_with(cloud_projects, cloud_projects)
 
 
 def test_cloud_pull_pulls_project_by_id() -> None:
@@ -75,19 +74,20 @@ def test_cloud_pull_pulls_project_by_id() -> None:
                       create_api_project(3, "Project 3"),
                       create_api_project(4, "Boot Camp/Project 4"),
                       create_api_project(5, "Boot Camp/Project 5")]
+    project_to_pull = cloud_projects[0]
 
     api_client = mock.Mock()
-    api_client.projects.get_all.return_value = cloud_projects
-    container.api_client.override(providers.Object(api_client))
+    api_client.projects.get.return_value = project_to_pull
+    container.api_client = api_client
 
     pull_manager = mock.Mock()
-    container.pull_manager.override(providers.Object(pull_manager))
+    container.pull_manager = pull_manager
 
-    result = CliRunner().invoke(lean, ["cloud", "pull", "--project", "1"])
+    result = CliRunner().invoke(lean, ["cloud", "pull", "--project", project_to_pull.projectId])
 
     assert result.exit_code == 0
 
-    pull_manager.pull_projects.assert_called_once_with([cloud_projects[0]])
+    pull_manager.pull_projects.assert_called_once_with([project_to_pull], None)
 
 
 def test_cloud_pull_pulls_project_by_name() -> None:
@@ -101,16 +101,16 @@ def test_cloud_pull_pulls_project_by_name() -> None:
 
     api_client = mock.Mock()
     api_client.projects.get_all.return_value = cloud_projects
-    container.api_client.override(providers.Object(api_client))
+    container.api_client = api_client
 
     pull_manager = mock.Mock()
-    container.pull_manager.override(providers.Object(pull_manager))
+    container.pull_manager = pull_manager
 
     result = CliRunner().invoke(lean, ["cloud", "pull", "--project", "Project 1"])
 
     assert result.exit_code == 0
 
-    pull_manager.pull_projects.assert_called_once_with([cloud_projects[0]])
+    pull_manager.pull_projects.assert_called_once_with([cloud_projects[0]], cloud_projects)
 
 
 def test_cloud_pull_aborts_when_project_input_matches_no_cloud_projects() -> None:
@@ -124,10 +124,10 @@ def test_cloud_pull_aborts_when_project_input_matches_no_cloud_projects() -> Non
 
     api_client = mock.Mock()
     api_client.projects.get_all.return_value = cloud_projects
-    container.api_client.override(providers.Object(api_client))
+    container.api_client = api_client
 
     pull_manager = mock.Mock()
-    container.pull_manager.override(providers.Object(pull_manager))
+    container.pull_manager = pull_manager
 
     result = CliRunner().invoke(lean, ["cloud", "pull", "--project", "Project 4"])
 

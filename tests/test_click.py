@@ -16,23 +16,25 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 from unittest import mock
+from unittest.mock import patch
 
 import click
 import pytest
 from click.testing import CliRunner
-from dependency_injector import providers
 
 from lean.click import DateParameter, LeanCommand, PathParameter
 from lean.container import container
+from tests.test_helpers import create_fake_lean_cli_directory
 
 
+@patch("platform.platform", lambda: "OS")
 def test_lean_command_enables_verbose_logging_when_verbose_option_given() -> None:
     @click.command(cls=LeanCommand)
     def command() -> None:
         pass
 
     logger = mock.Mock()
-    container.logger.override(providers.Object(logger))
+    container.logger = logger
 
     result = CliRunner().invoke(command, ["--verbose"])
 
@@ -42,12 +44,15 @@ def test_lean_command_enables_verbose_logging_when_verbose_option_given() -> Non
 
 
 def test_lean_command_sets_default_lean_config_path_when_lean_config_option_given() -> None:
+    create_fake_lean_cli_directory()
+
     @click.command(cls=LeanCommand, requires_lean_config=True)
     def command() -> None:
         pass
 
     lean_config_manager = mock.Mock()
-    container.lean_config_manager.override(providers.Object(lean_config_manager))
+    lean_config_manager.get_cli_root_directory = mock.MagicMock(return_value=Path.cwd())
+    container.lean_config_manager = lean_config_manager
 
     with (Path.cwd() / "custom-config.json").open("w+", encoding="utf-8") as file:
         file.write("{}")
@@ -98,7 +103,7 @@ def test_lean_command_checks_for_cli_updates() -> None:
         pass
 
     update_manager = mock.Mock()
-    container.update_manager.override(providers.Object(update_manager))
+    container.update_manager = update_manager
 
     result = CliRunner().invoke(command)
 
@@ -113,7 +118,7 @@ def test_lean_command_does_not_check_for_cli_updates_when_command_raises() -> No
         raise RuntimeError("Oops")
 
     update_manager = mock.Mock()
-    container.update_manager.override(providers.Object(update_manager))
+    container.update_manager = update_manager
 
     result = CliRunner().invoke(command)
 
@@ -129,8 +134,8 @@ def test_path_parameter_fails_when_input_not_valid_path() -> None:
         pass
 
     path_manager = mock.Mock()
-    path_manager.is_path_valid.return_value = False
-    container.path_manager.override(providers.Object(path_manager))
+    path_manager.is_cli_path_valid.return_value = False
+    container.path_manager = path_manager
 
     result = CliRunner().invoke(command, ["invalid-path.txt"])
 

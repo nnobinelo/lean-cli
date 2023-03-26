@@ -43,7 +43,8 @@ class CLIConfigManager:
                                              "The default language used when creating new projects.",
                                              ["python", "csharp"],
                                              False,
-                                             general_storage)
+                                             general_storage,
+                                             "python")
 
         self.engine_image = Option("engine-image",
                                    f"The Docker image used when running the LEAN engine ({DEFAULT_ENGINE_IMAGE} if not set).",
@@ -75,7 +76,7 @@ class CLIConfigManager:
 
         if option is None:
             raise MoreInfoError(f"There doesn't exist an option with key '{key}'",
-                                "https://www.lean.io/docs/lean-cli/api-reference/lean-config-set#02-Description")
+                                "https://www.lean.io/docs/v2/lean-cli/api-reference/lean-config-set#02-Description")
 
         return option
 

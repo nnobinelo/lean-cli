@@ -21,18 +21,18 @@ from lean.components.config.output_config_manager import OutputConfigManager
 from lean.components.config.project_config_manager import ProjectConfigManager
 from lean.components.config.storage import Storage
 from lean.components.docker.lean_runner import LeanRunner
+from lean.components.util.path_manager import PathManager
 from lean.components.util.platform_manager import PlatformManager
 from lean.components.util.project_manager import ProjectManager
 from lean.components.util.temp_manager import TempManager
 from lean.components.util.xml_manager import XMLManager
-from lean.constants import DEFAULT_ENGINE_IMAGE
+from lean.constants import DEFAULT_ENGINE_IMAGE, LEAN_ROOT_PATH, DEFAULT_DATA_DIRECTORY_NAME
 from lean.models.utils import DebuggingMethod
 from lean.models.docker import DockerImage
 from lean.models.modules import NuGetPackage
 from tests.test_helpers import create_fake_lean_cli_directory
 
 ENGINE_IMAGE = DockerImage.parse(DEFAULT_ENGINE_IMAGE)
-
 
 def create_lean_runner(docker_manager: mock.Mock) -> LeanRunner:
     logger = mock.Mock()
@@ -56,7 +56,14 @@ def create_lean_runner(docker_manager: mock.Mock) -> LeanRunner:
     module_manager.get_installed_packages.return_value = [NuGetPackage(name="QuantConnect.Brokerages", version="1.0.0")]
 
     xml_manager = XMLManager()
-    project_manager = ProjectManager(project_config_manager, lean_config_manager, xml_manager, PlatformManager())
+    platform_manager = PlatformManager()
+    path_manager = PathManager(lean_config_manager, platform_manager)
+    project_manager = ProjectManager(logger,
+                                     project_config_manager,
+                                     lean_config_manager,
+                                     path_manager,
+                                     xml_manager,
+                                     platform_manager)
 
     return LeanRunner(logger,
                       project_config_manager,
@@ -163,7 +170,7 @@ def test_run_lean_mounts_config_file() -> None:
     docker_manager.run_image.assert_called_once()
     args, kwargs = docker_manager.run_image.call_args
 
-    assert any([mount["Target"] == "/Lean/Launcher/bin/Debug/config.json" for mount in kwargs["mounts"]])
+    assert any([mount["Target"] == f"{LEAN_ROOT_PATH}/config.json" for mount in kwargs["mounts"]])
 
 
 def test_run_lean_mounts_data_directory() -> None:
@@ -306,7 +313,9 @@ def test_run_lean_compiles_python_project() -> None:
     docker_manager.run_image.assert_called_once()
     args, kwargs = docker_manager.run_image.call_args
 
-    build_command = next((cmd for cmd in kwargs["commands"] if cmd.startswith("python -m compileall")), None)
+    build_command = next((cmd for cmd in kwargs["commands"] if cmd.startswith("""if [ -d '/LeanCLI' ];
+            then
+                python -m compileall""")), None)
     assert build_command is not None
 
 def test_run_lean_mounts_project_directory_when_running_python_algorithm() -> None:
@@ -420,3 +429,82 @@ def test_run_lean_raises_when_run_image_fails() -> None:
                              False)
 
     docker_manager.run_image.assert_called_once()
+
+
+@pytest.mark.parametrize("os,root", [
+    ("Windows", ""),
+    ("Linux", ""),
+    ("Darwin", ""),
+    ("Windows", "some/directory"),
+    ("Linux", "some/directory"),
+    ("Darwin", "some/directory"),
+    ("Windows", r"C:\Users\user\some_directory"),
+    ("Linux", "/home/user/some_directory"),
+    ("Darwin", "/Users/user/some_directory")
+])
+def test_run_lean_mounts_terminal_link_symbol_map_file_from_data_folder(os: str, root: str) -> None:
+    from platform import system
+    if os != system():
+        pytest.skip(f"This test requires {os}")
+
+    create_fake_lean_cli_directory()
+
+    docker_manager = mock.Mock()
+    docker_manager.run_image.return_value = True
+
+    local_path = Path(root) / "terminal-link-symbol-map.json"
+
+    lean_runner = create_lean_runner(docker_manager)
+    lean_runner.run_lean({"terminal-link-symbol-map-file": str(local_path)},
+                         "backtesting",
+                         Path.cwd() / "Python Project" / "main.py",
+                         Path.cwd() / "output",
+                         ENGINE_IMAGE,
+                         None,
+                         False,
+                         False)
+
+    docker_manager.run_image.assert_called_once()
+    args, kwargs = docker_manager.run_image.call_args
+
+    from lean.container import container
+    cli_root_dir = container.lean_config_manager.get_cli_root_directory()
+    expected_source = local_path \
+        if local_path.is_absolute() \
+        else cli_root_dir / DEFAULT_DATA_DIRECTORY_NAME / "symbol-properties" / local_path
+
+    assert any([
+        Path(mount["Source"]) == expected_source and
+        mount["Target"] == f'/Files/terminal-link-symbol-map-file'
+        for mount in kwargs["mounts"]
+    ])
+
+
+def test_run_lean_mounts_transaction_log_file_from_cli_root() -> None:
+    create_fake_lean_cli_directory()
+
+    docker_manager = mock.Mock()
+    docker_manager.run_image.return_value = True
+
+    lean_runner = create_lean_runner(docker_manager)
+
+    lean_runner.run_lean({"transaction-log": "transaction-log.log"},
+                         "backtesting",
+                         Path.cwd() / "Python Project" / "main.py",
+                         Path.cwd() / "output",
+                         ENGINE_IMAGE,
+                         None,
+                         False,
+                         False)
+
+    docker_manager.run_image.assert_called_once()
+    args, kwargs = docker_manager.run_image.call_args
+
+    from lean.container import container
+    cli_root_dir = container.lean_config_manager.get_cli_root_directory()
+
+    assert any([
+        Path(mount["Source"]) == Path(f'{cli_root_dir}/transaction-log.log') and
+        mount["Target"] == f'/Files/transaction-log'
+        for mount in kwargs["mounts"]
+    ])
